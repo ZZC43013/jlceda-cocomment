@@ -1,0 +1,123 @@
+{
+	"name": "cocomment",
+	"uuid": "df35742209c346818b65b9899677c10f",
+	"displayName": "CoComment 团队评论",
+	"description": "在原理图和PCB上直接圈选批注，支持评论线程管理、状态追踪，团队协作的设计评审利器。",
+	"version": "0.1.0",
+	"publisher": "zhaozicong",
+	"engines": {
+		"eda": "^3.0.0"
+	},
+	"license": "MIT",
+	"repository": {
+		"type": "extension-store",
+		"url": ""
+	},
+	"categories": "Productivity",
+	"keywords": [
+		"评论",
+		"协作",
+		"批注",
+		"review",
+		"comment"
+	],
+	"images": {
+		"logo": "./images/logo.png"
+	},
+	"homepage": "",
+	"bugs": "",
+	"activationEvents": {},
+	"entry": "./dist/index",
+	"dependentExtensions": {},
+	"headerMenus": {
+		"home": [
+			{
+				"id": "cocomment-menu",
+				"title": "CoComment",
+				"menuItems": [
+					{
+						"id": "About",
+						"title": "关于 CoComment",
+						"registerFn": "about"
+					}
+				]
+			}
+		],
+		"sch": [
+			{
+				"id": "cocomment-menu",
+				"title": "CoComment",
+				"menuItems": [
+					{
+						"id": "togglePanel",
+						"title": "显示评论面板",
+						"registerFn": "togglePanel"
+					},
+					{
+						"id": "addAnnotation",
+						"title": "添加批注",
+						"registerFn": "addAnnotation"
+					},
+					{
+						"id": "toggleAnnotations",
+						"title": "显示/隐藏批注",
+						"registerFn": "toggleAnnotations"
+					},
+					{
+						"id": "exportComments",
+						"title": "导出评论",
+						"registerFn": "exportComments"
+					},
+					{
+						"id": "importComments",
+						"title": "导入评论",
+						"registerFn": "importComments"
+					},
+					{
+						"id": "About",
+						"title": "关于 CoComment",
+						"registerFn": "about"
+					}
+				]
+			}
+		],
+		"pcb": [
+			{
+				"id": "cocomment-menu",
+				"title": "CoComment",
+				"menuItems": [
+					{
+						"id": "togglePanel",
+						"title": "显示评论面板",
+						"registerFn": "togglePanel"
+					},
+					{
+						"id": "addAnnotation",
+						"title": "添加批注",
+						"registerFn": "addAnnotation"
+					},
+					{
+						"id": "toggleAnnotations",
+						"title": "显示/隐藏批注",
+						"registerFn": "toggleAnnotations"
+					},
+					{
+						"id": "exportComments",
+						"title": "导出评论",
+						"registerFn": "exportComments"
+					},
+					{
+						"id": "importComments",
+						"title": "导入评论",
+						"registerFn": "importComments"
+					},
+					{
+						"id": "About",
+						"title": "关于 CoComment",
+						"registerFn": "about"
+					}
+				]
+			}
+		]
+	}
+}

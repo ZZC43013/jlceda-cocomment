@@ -1,0 +1,820 @@
+<!doctype html>
+<html lang="zh-Hans">
+<head>
+	<meta charset="utf-8" />
+	<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+	<title>CoComment 评论面板</title>
+	<style>
+		* {
+			margin: 0;
+			padding: 0;
+			box-sizing: border-box;
+		}
+		html, body {
+			width: 100%;
+			height: 100%;
+			font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'PingFang SC', 'Hiragino Sans GB', 'Microsoft YaHei', sans-serif;
+			font-size: 13px;
+			color: #333;
+			background: #fff;
+			overflow: hidden;
+		}
+		.app {
+			display: flex;
+			flex-direction: column;
+			height: 100%;
+		}
+		.header {
+			display: flex;
+			align-items: center;
+			justify-content: space-between;
+			padding: 10px 12px;
+			border-bottom: 1px solid #e8e8e8;
+			background: #fafafa;
+			flex-shrink: 0;
+		}
+		.header-title {
+			font-weight: 600;
+			font-size: 14px;
+			color: #1890ff;
+		}
+		.header-actions {
+			display: flex;
+			gap: 6px;
+		}
+		.icon-btn {
+			width: 28px;
+			height: 28px;
+			border: none;
+			background: transparent;
+			border-radius: 4px;
+			cursor: pointer;
+			font-size: 14px;
+			display: flex;
+			align-items: center;
+			justify-content: center;
+			color: #666;
+			transition: background 0.2s;
+		}
+		.icon-btn:hover {
+			background: #f0f0f0;
+		}
+		.icon-btn.primary {
+			background: #1890ff;
+			color: #fff;
+		}
+		.icon-btn.primary:hover {
+			background: #40a9ff;
+		}
+		.filters {
+			padding: 8px 12px;
+			border-bottom: 1px solid #f0f0f0;
+			display: flex;
+			gap: 8px;
+			flex-shrink: 0;
+		}
+		.filter-btn {
+			padding: 4px 12px;
+			border: 1px solid #d9d9d9;
+			border-radius: 12px;
+			background: #fff;
+			cursor: pointer;
+			font-size: 12px;
+			color: #666;
+			transition: all 0.2s;
+		}
+		.filter-btn.active {
+			border-color: #1890ff;
+			background: #e6f7ff;
+			color: #1890ff;
+		}
+		.search-box {
+			padding: 8px 12px;
+			border-bottom: 1px solid #f0f0f0;
+			flex-shrink: 0;
+		}
+		.search-input {
+			width: 100%;
+			padding: 6px 10px;
+			border: 1px solid #d9d9d9;
+			border-radius: 4px;
+			font-size: 12px;
+			outline: none;
+		}
+		.search-input:focus {
+			border-color: #1890ff;
+		}
+		.thread-list {
+			flex: 1;
+			overflow-y: auto;
+			padding: 4px 0;
+		}
+		.thread-card {
+			padding: 10px 12px;
+			border-bottom: 1px solid #f5f5f5;
+			cursor: pointer;
+			transition: background 0.2s;
+		}
+		.thread-card:hover {
+			background: #fafafa;
+		}
+		.thread-card.active {
+			background: #e6f7ff;
+		}
+		.thread-header {
+			display: flex;
+			align-items: center;
+			justify-content: space-between;
+			margin-bottom: 4px;
+		}
+		.thread-title {
+			font-weight: 500;
+			color: #333;
+			overflow: hidden;
+			text-overflow: ellipsis;
+			white-space: nowrap;
+			flex: 1;
+		}
+		.thread-status {
+			font-size: 11px;
+			padding: 1px 6px;
+			border-radius: 8px;
+			flex-shrink: 0;
+			margin-left: 8px;
+		}
+		.thread-status.open {
+			background: #fff2f0;
+			color: #ff4d4f;
+		}
+		.thread-status.resolved {
+			background: #f6ffed;
+			color: #52c41a;
+		}
+		.thread-meta {
+			font-size: 11px;
+			color: #999;
+			display: flex;
+			justify-content: space-between;
+		}
+		.thread-preview {
+			color: #666;
+			font-size: 12px;
+			margin-top: 4px;
+			overflow: hidden;
+			text-overflow: ellipsis;
+			display: -webkit-box;
+			-webkit-line-clamp: 2;
+			-webkit-box-orient: vertical;
+			line-height: 1.5;
+		}
+		.empty {
+			text-align: center;
+			padding: 40px 20px;
+			color: #999;
+			font-size: 12px;
+		}
+		.comment-detail {
+			border-top: 1px solid #e8e8e8;
+			background: #fafafa;
+			max-height: 200px;
+			overflow-y: auto;
+			display: none;
+		}
+		.comment-detail.active {
+			display: block;
+		}
+		.comment-list {
+			padding: 10px 12px;
+		}
+		.comment-item {
+			margin-bottom: 10px;
+			display: flex;
+			gap: 8px;
+		}
+		.comment-avatar {
+			width: 24px;
+			height: 24px;
+			border-radius: 50%;
+			background: #1890ff;
+			color: #fff;
+			font-size: 11px;
+			display: flex;
+			align-items: center;
+			justify-content: center;
+			flex-shrink: 0;
+		}
+		.comment-body {
+			flex: 1;
+			min-width: 0;
+		}
+		.comment-author {
+			font-size: 11px;
+			color: #666;
+			margin-bottom: 2px;
+		}
+		.comment-content {
+			font-size: 12px;
+			color: #333;
+			line-height: 1.5;
+			word-break: break-word;
+		}
+		.comment-input-wrap {
+			padding: 8px 12px;
+			border-top: 1px solid #f0f0f0;
+			background: #fff;
+		}
+		.comment-input {
+			width: 100%;
+			padding: 6px 10px;
+			border: 1px solid #d9d9d9;
+			border-radius: 4px;
+			font-size: 12px;
+			resize: none;
+			outline: none;
+			min-height: 48px;
+			font-family: inherit;
+		}
+		.comment-input:focus {
+			border-color: #1890ff;
+		}
+		.comment-actions {
+			display: flex;
+			justify-content: flex-end;
+			margin-top: 6px;
+			gap: 6px;
+		}
+		.btn {
+			padding: 4px 14px;
+			border: 1px solid #d9d9d9;
+			border-radius: 4px;
+			background: #fff;
+			cursor: pointer;
+			font-size: 12px;
+			color: #333;
+			transition: all 0.2s;
+		}
+		.btn:hover {
+			border-color: #1890ff;
+			color: #1890ff;
+		}
+		.btn.primary {
+			background: #1890ff;
+			border-color: #1890ff;
+			color: #fff;
+		}
+		.btn.primary:hover {
+			background: #40a9ff;
+			border-color: #40a9ff;
+		}
+		.btn.danger-text {
+			border: none;
+			background: transparent;
+			color: #ff4d4f;
+		}
+		.btn.success-text {
+			border: none;
+			background: transparent;
+			color: #52c41a;
+		}
+		.thread-detail-actions {
+			display: flex;
+			justify-content: flex-end;
+			gap: 8px;
+			padding: 6px 12px;
+			border-top: 1px solid #f0f0f0;
+			background: #fff;
+		}
+		.footer {
+			padding: 6px 12px;
+			border-top: 1px solid #f0f0f0;
+			font-size: 11px;
+			color: #999;
+			flex-shrink: 0;
+			display: flex;
+			justify-content: space-between;
+			align-items: center;
+		}
+		.thread-card.flash {
+			animation: card-flash 0.5s ease-in-out 3;
+		}
+		@keyframes card-flash {
+			0%, 100% { background: transparent; }
+			50% { background: #fff7e6; }
+		}
+		.comment-actions-row {
+			display: flex;
+			justify-content: flex-end;
+			gap: 4px;
+			margin-top: 4px;
+		}
+		.comment-action-btn {
+			border: none;
+			background: transparent;
+			color: #999;
+			cursor: pointer;
+			font-size: 11px;
+			padding: 2px 6px;
+			border-radius: 3px;
+		}
+		.comment-action-btn:hover {
+			background: #f0f0f0;
+			color: #1890ff;
+		}
+		.comment-action-btn.danger:hover {
+			color: #ff4d4f;
+		}
+		.modal-mask {
+			position: fixed;
+			top: 0;
+			left: 0;
+			width: 100%;
+			height: 100%;
+			background: rgba(0, 0, 0, 0.4);
+			display: none;
+			z-index: 100;
+			align-items: center;
+			justify-content: center;
+		}
+		.modal-mask.active {
+			display: flex;
+		}
+		.modal {
+			background: #fff;
+			border-radius: 8px;
+			padding: 16px;
+			width: 260px;
+			box-shadow: 0 4px 16px rgba(0, 0, 0, 0.12);
+		}
+		.modal-title {
+			font-size: 14px;
+			font-weight: 600;
+			margin-bottom: 12px;
+		}
+		.modal-field {
+			margin-bottom: 12px;
+		}
+		.modal-label {
+			font-size: 12px;
+			color: #666;
+			margin-bottom: 4px;
+			display: block;
+		}
+		.modal-input {
+			width: 100%;
+			padding: 6px 10px;
+			border: 1px solid #d9d9d9;
+			border-radius: 4px;
+			font-size: 13px;
+			outline: none;
+		}
+		.modal-input:focus {
+			border-color: #1890ff;
+		}
+		.color-row {
+			display: flex;
+			gap: 6px;
+			flex-wrap: wrap;
+		}
+		.color-dot {
+			width: 22px;
+			height: 22px;
+			border-radius: 50%;
+			cursor: pointer;
+			border: 2px solid transparent;
+			transition: transform 0.1s;
+		}
+		.color-dot:hover {
+			transform: scale(1.15);
+		}
+		.color-dot.selected {
+			border-color: #333;
+		}
+		.modal-actions {
+			display: flex;
+			justify-content: flex-end;
+			gap: 8px;
+			margin-top: 16px;
+		}
+	</style>
+</head>
+<body>
+	<div class="app">
+		<div class="header">
+			<div class="header-title">💬 CoComment</div>
+			<div class="header-actions">
+				<button class="icon-btn primary" id="addBtn" title="添加批注">+</button>
+				<button class="icon-btn" id="exportBtn" title="导出">⬇</button>
+				<button class="icon-btn" id="importBtn" title="导入">⬆</button>
+				<button class="icon-btn" id="toggleBtn" title="显隐批注">👁</button>
+				<button class="icon-btn" id="settingsBtn" title="用户设置">⚙</button>
+			</div>
+		</div>
+
+		<div class="search-box">
+			<input type="text" class="search-input" id="searchInput" placeholder="搜索评论..." />
+		</div>
+
+		<div class="filters">
+			<button class="filter-btn active" data-filter="all">全部</button>
+			<button class="filter-btn" data-filter="open">未解决</button>
+			<button class="filter-btn" data-filter="resolved">已解决</button>
+		</div>
+
+		<div class="thread-list" id="threadList"></div>
+
+		<div class="comment-detail" id="commentDetail">
+			<div class="comment-list" id="commentList"></div>
+			<div class="comment-input-wrap">
+				<textarea class="comment-input" id="commentInput" placeholder="输入评论，Ctrl+Enter 发送..."></textarea>
+				<div class="comment-actions">
+					<button class="btn primary" id="sendBtn">发送</button>
+				</div>
+			</div>
+			<div class="thread-detail-actions" id="threadDetailActions">
+				<button class="btn success-text" id="resolveBtn">标记已解决</button>
+				<button class="btn danger-text" id="deleteBtn">删除</button>
+			</div>
+		</div>
+
+		<div class="footer">
+			<span id="footerCount">共 0 条</span>
+			<span style="color: #bbb;">v0.1.0</span>
+		</div>
+	</div>
+
+	<!-- 用户设置弹窗 -->
+	<div class="modal-mask" id="settingsModal">
+		<div class="modal">
+			<div class="modal-title">用户设置</div>
+			<div class="modal-field">
+				<label class="modal-label">昵称</label>
+				<input type="text" class="modal-input" id="userNameInput" maxlength="20" />
+			</div>
+			<div class="modal-field">
+				<label class="modal-label">批注颜色</label>
+				<div class="color-row" id="colorRow"></div>
+			</div>
+			<div class="modal-actions">
+				<button class="btn" id="settingsCancel">取消</button>
+				<button class="btn primary" id="settingsSave">保存</button>
+			</div>
+		</div>
+	</div>
+
+	<script>
+		(function() {
+			const state = {
+				threads: [],
+				comments: {},
+				numbers: {},
+				filter: 'all',
+				search: '',
+				activeThreadId: null,
+				visible: true,
+				currentUser: null,
+			};
+
+			const USER_COLORS = ['#ff4d4f', '#52c41a', '#1890ff', '#722ed1', '#fa8c16', '#eb2f96', '#13c2c2', '#faad14'];
+
+			const threadListEl = document.getElementById('threadList');
+			const commentDetailEl = document.getElementById('commentDetail');
+			const commentListEl = document.getElementById('commentList');
+			const commentInput = document.getElementById('commentInput');
+			const searchInput = document.getElementById('searchInput');
+			const footerCount = document.getElementById('footerCount');
+			const resolveBtn = document.getElementById('resolveBtn');
+			const deleteBtn = document.getElementById('deleteBtn');
+			const sendBtn = document.getElementById('sendBtn');
+
+			function post(type, data) {
+				window.parent.postMessage({ source: 'cocomment-panel', type, ...(data || {}) }, '*');
+			}
+
+			function formatTime(ts) {
+				const d = new Date(ts);
+				const now = Date.now();
+				const diff = now - ts;
+				if (diff < 60000) return '刚刚';
+				if (diff < 3600000) return Math.floor(diff / 60000) + ' 分钟前';
+				if (diff < 86400000) return Math.floor(diff / 3600000) + ' 小时前';
+				return (d.getMonth() + 1) + '/' + d.getDate();
+			}
+
+			function getFilteredThreads() {
+				let list = state.threads;
+				if (state.filter === 'open') {
+					list = list.filter(t => t.status === 'open');
+				}
+				else if (state.filter === 'resolved') {
+					list = list.filter(t => t.status === 'resolved');
+				}
+				if (state.search) {
+					const kw = state.search.toLowerCase();
+					list = list.filter(t => {
+						const comments = state.comments[t.id] || [];
+						// 同时搜评论内容、作者名
+						return comments.some(c =>
+							c.content.toLowerCase().includes(kw)
+							|| (c.authorName || '').toLowerCase().includes(kw)
+						);
+					});
+				}
+				return list.sort((a, b) => b.createdAt - a.createdAt);
+			}
+
+			function renderThreadList() {
+				const list = getFilteredThreads();
+				footerCount.textContent = '共 ' + list.length + ' 条';
+
+				if (list.length === 0) {
+					threadListEl.innerHTML = '<div class="empty">暂无评论<br/>点击右上角 + 添加批注</div>';
+					return;
+				}
+
+				threadListEl.innerHTML = '';
+				list.forEach((t) => {
+					const comments = state.comments[t.id] || [];
+					const firstComment = comments[0];
+					const card = document.createElement('div');
+					card.className = 'thread-card' + (state.activeThreadId === t.id ? ' active' : '');
+					card.dataset.id = t.id;
+
+					const statusText = t.status === 'resolved' ? '已解决' : '未解决';
+					const firstContent = firstComment ? firstComment.content : '';
+					const num = (state.numbers && state.numbers[t.id]) || 0;
+					const titleText = firstContent || '(待输入评论)';
+
+					card.innerHTML = '\
+						<div class="thread-header">\
+							<span class="thread-title">#' + (num > 0 ? num : '?') + ' ' + escapeHtml(titleText) + '</span>\
+							<span class="thread-status ' + t.status + '">' + statusText + '</span>\
+						</div>\
+						<div class="thread-meta">\
+							<span>' + comments.length + ' 条评论</span>\
+							<span>' + formatTime(t.createdAt) + '</span>\
+						</div>';
+
+					card.addEventListener('click', function() {
+						setActiveThread(t.id);
+					});
+
+					threadListEl.appendChild(card);
+				});
+			}
+
+			function escapeHtml(s) {
+				var div = document.createElement('div');
+				div.textContent = s;
+				return div.innerHTML;
+			}
+
+			function setActiveThread(threadId) {
+				state.activeThreadId = threadId;
+				renderThreadList();
+				renderCommentDetail();
+				post('thread-select', { threadId });
+			}
+
+			function renderCommentDetail() {
+				if (!state.activeThreadId) {
+					commentDetailEl.classList.remove('active');
+					return;
+				}
+				const thread = state.threads.find(t => t.id === state.activeThreadId);
+				if (!thread) {
+					commentDetailEl.classList.remove('active');
+					return;
+				}
+				commentDetailEl.classList.add('active');
+
+				if (thread.status === 'resolved') {
+					resolveBtn.textContent = '重新打开';
+					resolveBtn.className = 'btn';
+				}
+				else {
+					resolveBtn.textContent = '标记已解决';
+					resolveBtn.className = 'btn success-text';
+				}
+
+				const comments = state.comments[thread.id] || [];
+				commentListEl.innerHTML = '';
+				comments.forEach(c => {
+					const item = document.createElement('div');
+					item.className = 'comment-item';
+					const initial = (c.authorName || '?').substring(0, 1).toUpperCase();
+					const canDelete = state.currentUser && c.authorId === state.currentUser.id;
+					item.innerHTML = '\
+						<div class="comment-avatar">' + escapeHtml(initial) + '</div>\
+						<div class="comment-body">\
+							<div class="comment-author">' + escapeHtml(c.authorName || '匿名') + ' · ' + formatTime(c.createdAt) + '</div>\
+							<div class="comment-content">' + escapeHtml(c.content) + '</div>\
+							' + (canDelete ? '<div class="comment-actions-row"><button class="comment-action-btn danger" data-comment-id="' + c.id + '">删除</button></div>' : '') + '\
+						</div>';
+					commentListEl.appendChild(item);
+				});
+
+				if (comments.length === 0) {
+					commentListEl.innerHTML = '<div class="empty" style="padding: 20px 0;">暂无评论</div>';
+				}
+
+				// 绑定单条评论删除
+				commentListEl.querySelectorAll('.comment-action-btn.danger').forEach(btn => {
+					btn.addEventListener('click', function() {
+						const cid = this.dataset.commentId;
+						if (!cid) return;
+						if (!confirm('确定删除这条评论吗？')) return;
+						post('action:delete-comment', { commentId: cid });
+					});
+				});
+
+				commentListEl.scrollTop = commentListEl.scrollHeight;
+			}
+
+			document.querySelectorAll('.filter-btn').forEach(btn => {
+				btn.addEventListener('click', function() {
+					document.querySelectorAll('.filter-btn').forEach(b => b.classList.remove('active'));
+					this.classList.add('active');
+					state.filter = this.dataset.filter;
+					renderThreadList();
+				});
+			});
+
+			searchInput.addEventListener('input', function() {
+				state.search = this.value;
+				renderThreadList();
+			});
+
+			document.getElementById('addBtn').addEventListener('click', function() {
+				post('action:add-comment');
+			});
+
+			document.getElementById('exportBtn').addEventListener('click', function() {
+				post('action:export');
+			});
+
+			document.getElementById('importBtn').addEventListener('click', function() {
+				post('action:import');
+			});
+
+			document.getElementById('toggleBtn').addEventListener('click', function() {
+				state.visible = !state.visible;
+				post('action:toggle-visible', { visible: state.visible });
+				this.style.opacity = state.visible ? '1' : '0.5';
+			});
+
+			// === 用户设置弹窗 ===
+			const settingsModal = document.getElementById('settingsModal');
+			const userNameInput = document.getElementById('userNameInput');
+			const colorRow = document.getElementById('colorRow');
+			let selectedColor = USER_COLORS[0];
+
+			function renderColorDots() {
+				colorRow.innerHTML = '';
+				USER_COLORS.forEach(c => {
+					const dot = document.createElement('div');
+					dot.className = 'color-dot' + (c === selectedColor ? ' selected' : '');
+					dot.style.background = c;
+					dot.addEventListener('click', function() {
+						selectedColor = c;
+						renderColorDots();
+					});
+					colorRow.appendChild(dot);
+				});
+			}
+
+			document.getElementById('settingsBtn').addEventListener('click', function() {
+				// 打开弹窗时先拉一次当前用户
+				post('action:request-user');
+			});
+
+			function openSettings(user) {
+				if (user) {
+					state.currentUser = user;
+					userNameInput.value = user.name || '';
+					selectedColor = user.color || USER_COLORS[0];
+				}
+				renderColorDots();
+				settingsModal.classList.add('active');
+				userNameInput.focus();
+			}
+
+			document.getElementById('settingsCancel').addEventListener('click', function() {
+				settingsModal.classList.remove('active');
+			});
+
+			document.getElementById('settingsSave').addEventListener('click', function() {
+				const name = userNameInput.value.trim() || '我';
+				const user = {
+					id: state.currentUser ? state.currentUser.id : '',
+					name: name,
+					color: selectedColor,
+				};
+				post('action:set-user', { user });
+				settingsModal.classList.remove('active');
+			});
+
+			// 点击遮罩关闭
+			settingsModal.addEventListener('click', function(e) {
+				if (e.target === settingsModal) {
+					settingsModal.classList.remove('active');
+				}
+			});
+
+			sendBtn.addEventListener('click', sendComment);
+			commentInput.addEventListener('keydown', function(e) {
+				if ((e.ctrlKey || e.metaKey) && e.key === 'Enter') {
+					sendComment();
+				}
+			});
+
+			function sendComment() {
+				const content = commentInput.value.trim();
+				if (!content || !state.activeThreadId) return;
+				post('action:add-comment-to-thread', { threadId: state.activeThreadId, content });
+				commentInput.value = '';
+			}
+
+			resolveBtn.addEventListener('click', function() {
+				if (!state.activeThreadId) return;
+				const thread = state.threads.find(t => t.id === state.activeThreadId);
+				if (!thread) return;
+				if (thread.status === 'resolved') {
+					post('action:reopen-thread', { threadId: state.activeThreadId });
+				}
+				else {
+					post('action:resolve-thread', { threadId: state.activeThreadId });
+				}
+			});
+
+			deleteBtn.addEventListener('click', function() {
+				if (!state.activeThreadId) return;
+				if (!confirm('确定要删除这条评论线程吗？')) return;
+				post('action:delete-thread', { threadId: state.activeThreadId });
+				state.activeThreadId = null;
+				renderThreadList();
+				renderCommentDetail();
+			});
+
+			window.addEventListener('message', function(e) {
+				const msg = e.data;
+				if (!msg || typeof msg !== 'object') return;
+				if (msg.source === 'cocomment-parent') {
+					switch (msg.type) {
+						case 'threads:update':
+							state.threads = msg.threads || [];
+							state.comments = msg.comments || {};
+							state.numbers = msg.numbers || {};
+							renderThreadList();
+							renderCommentDetail();
+							break;
+						case 'thread:created':
+							// 新批注已创建：选中并 focus 输入框，等用户输入首条评论
+							state.activeThreadId = msg.thread.id;
+							post('request:threads');
+							// 等下一帧渲染完再 focus
+							setTimeout(function() {
+								commentDetailEl.classList.add('active');
+								commentInput.focus();
+								commentInput.placeholder = '输入评论内容，按 Ctrl+Enter 发送...';
+							}, 50);
+							break;
+						case 'thread:flash':
+							// 由 Navigator.flashThread 触发，闪烁对应卡片
+							flashThreadCard(msg.threadId);
+							break;
+						case 'user:update':
+							// 收到当前用户信息，如果是请求打开设置则打开
+							if (msg.user) {
+								state.currentUser = msg.user;
+								if (settingsModal.classList.contains('active') === false && document.activeElement === document.body) {
+									// 不自动打开，仅在用户已点击设置按钮时使用
+								}
+								// 若刚刚点击了设置按钮（active 还没打开），打开它
+								if (!settingsModal.classList.contains('active')) {
+									openSettings(msg.user);
+								}
+							}
+							break;
+						case 'request:refresh':
+							post('request:threads');
+							break;
+					}
+				}
+			});
+
+			function flashThreadCard(threadId) {
+				const card = threadListEl.querySelector('.thread-card[data-id="' + threadId + '"]');
+				if (card) {
+					card.classList.remove('flash');
+					void card.offsetWidth;
+					card.classList.add('flash');
+					setTimeout(function() { card.classList.remove('flash'); }, 1500);
+				}
+			}
+
+			post('ready', {});
+			post('request:threads');
+		})();
+	</script>
+</body>
+</html>

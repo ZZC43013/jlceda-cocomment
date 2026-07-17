@@ -1,0 +1,280 @@
+<!doctype html>
+<html lang="zh-Hans">
+<head>
+	<meta charset="utf-8" />
+	<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+	<title>CoComment Overlay</title>
+	<style>
+		* {
+			margin: 0;
+			padding: 0;
+			box-sizing: border-box;
+		}
+		html, body {
+			width: 100%;
+			height: 100%;
+			overflow: hidden;
+			background: transparent;
+			pointer-events: none;
+		}
+		body.drawing {
+			pointer-events: auto;
+			cursor: crosshair;
+		}
+		.annotation-layer {
+			position: absolute;
+			top: 0;
+			left: 0;
+			width: 100%;
+			height: 100%;
+		}
+		.thread-box {
+			position: absolute;
+			border: 2px dashed #ff4d4f;
+			border-radius: 4px;
+			pointer-events: auto;
+			cursor: pointer;
+			transition: box-shadow 0.2s;
+			z-index: 10;
+		}
+		.thread-box.resolved {
+			border-style: solid;
+			border-color: #52c41a;
+			opacity: 0.6;
+		}
+		.thread-box:hover {
+			box-shadow: 0 0 0 3px rgba(255, 77, 79, 0.2);
+		}
+		.thread-box.resolved:hover {
+			box-shadow: 0 0 0 3px rgba(82, 196, 26, 0.2);
+		}
+		.thread-badge {
+			position: absolute;
+			top: -20px;
+			left: -2px;
+			background: #ff4d4f;
+			color: #fff;
+			font-size: 12px;
+			padding: 2px 8px;
+			border-radius: 10px;
+			white-space: nowrap;
+			font-weight: 500;
+		}
+		.thread-box.resolved .thread-badge {
+			background: #52c41a;
+		}
+		.draw-preview {
+			position: absolute;
+			border: 2px dashed #1890ff;
+			background: rgba(24, 144, 255, 0.1);
+			pointer-events: none;
+			display: none;
+			z-index: 100;
+		}
+		.draw-preview.active {
+			display: block;
+		}
+		.thread-box.flash {
+			animation: flash 0.5s ease-in-out 3;
+		}
+		.thread-box.highlight {
+			box-shadow: 0 0 0 4px rgba(24, 144, 255, 0.5);
+		}
+		@keyframes flash {
+			0%, 100% { opacity: 1; }
+			50% { opacity: 0.3; }
+		}
+	</style>
+</head>
+<body>
+	<div class="annotation-layer" id="layer">
+		<div class="draw-preview" id="drawPreview"></div>
+	</div>
+	<script>
+		(function() {
+			const layer = document.getElementById('layer');
+			const drawPreview = document.getElementById('drawPreview');
+			const threads = new Map();
+			const threadNumbers = {}; // {threadId: number}，由 PanelController 下发
+			let isDrawing = false;
+			let drawType = 'box';
+			let drawStartX = 0;
+			let drawStartY = 0;
+
+			function postMsg(type, data) {
+				window.parent.postMessage({ source: 'cocomment-overlay', type, ...data }, '*');
+			}
+
+			function getThreadNumber(id) {
+				return threadNumbers[id] || 0;
+			}
+
+			function addOrUpdateThread(data) {
+				let el = threads.get(data.id);
+				if (!el) {
+					el = document.createElement('div');
+					el.className = 'thread-box';
+					el.dataset.id = data.id;
+					const badge = document.createElement('div');
+					badge.className = 'thread-badge';
+					el.appendChild(badge);
+					el.addEventListener('click', function(e) {
+						e.stopPropagation();
+						postMsg('thread-click', { threadId: data.id });
+					});
+					layer.appendChild(el);
+					threads.set(data.id, el);
+				}
+				el.style.left = data.left + 'px';
+				el.style.top = data.top + 'px';
+				el.style.width = data.width + 'px';
+				el.style.height = data.height + 'px';
+				if (data.status === 'resolved') {
+					el.classList.add('resolved');
+				}
+				else {
+					el.classList.remove('resolved');
+				}
+				const badge = el.querySelector('.thread-badge');
+				if (badge) {
+					const num = getThreadNumber(data.id);
+					badge.textContent = num > 0 ? '#' + num : '#?';
+				}
+			}
+
+			function removeThread(id) {
+				const el = threads.get(id);
+				if (el) {
+					el.remove();
+					threads.delete(id);
+				}
+			}
+
+			function clearAll() {
+				for (const [id] of threads) {
+					removeThread(id);
+				}
+			}
+
+			function startDrawing(type) {
+				isDrawing = true;
+				drawType = type;
+				document.body.classList.add('drawing');
+				drawPreview.classList.add('active');
+			}
+
+			function cancelDrawing() {
+				isDrawing = false;
+				document.body.classList.remove('drawing');
+				drawPreview.classList.remove('active');
+			}
+
+			document.addEventListener('mousedown', function(e) {
+				if (!isDrawing) return;
+				drawStartX = e.clientX;
+				drawStartY = e.clientY;
+				drawPreview.style.left = drawStartX + 'px';
+				drawPreview.style.top = drawStartY + 'px';
+				drawPreview.style.width = '0px';
+				drawPreview.style.height = '0px';
+				postMsg('draw-start', { screenX: drawStartX, screenY: drawStartY });
+			});
+
+			document.addEventListener('mousemove', function(e) {
+				if (!isDrawing) return;
+				const x = Math.min(drawStartX, e.clientX);
+				const y = Math.min(drawStartY, e.clientY);
+				const w = Math.abs(e.clientX - drawStartX);
+				const h = Math.abs(e.clientY - drawStartY);
+				drawPreview.style.left = x + 'px';
+				drawPreview.style.top = y + 'px';
+				drawPreview.style.width = w + 'px';
+				drawPreview.style.height = h + 'px';
+			});
+
+			document.addEventListener('mouseup', function(e) {
+				if (!isDrawing) return;
+				const endX = e.clientX;
+				const endY = e.clientY;
+				cancelDrawing();
+				postMsg('draw-end', { screenX: endX, screenY: endY });
+			});
+
+			document.addEventListener('keydown', function(e) {
+				if (e.key === 'Escape' && isDrawing) {
+					cancelDrawing();
+					postMsg('draw-cancel', {});
+				}
+			});
+
+			window.addEventListener('message', function(e) {
+				const msg = e.data;
+				if (!msg || typeof msg !== 'object') return;
+				if (msg.source === 'cocomment-parent') {
+					switch (msg.type) {
+						case 'show':
+							layer.style.display = 'block';
+							break;
+						case 'hide':
+							layer.style.display = 'none';
+							break;
+						case 'update-thread':
+							addOrUpdateThread(msg.thread);
+							break;
+						case 'update-all':
+						clearAll();
+						if (msg.positions) {
+							msg.positions.forEach(function(t) { addOrUpdateThread(t); });
+						}
+						break;
+						case 'remove-thread':
+						removeThread(msg.threadId);
+						break;
+					case 'update-numbers':
+						// 更新所有 thread 的序号映射，并刷新徽章
+						if (msg.numbers) {
+							Object.assign(threadNumbers, msg.numbers);
+							threads.forEach(function(el, id) {
+								const badge = el.querySelector('.thread-badge');
+								if (badge) {
+									const num = getThreadNumber(id);
+									badge.textContent = num > 0 ? '#' + num : '#?';
+								}
+							});
+						}
+						break;
+					case 'clear-all':
+						clearAll();
+						break;
+						case 'start-drawing':
+							startDrawing(msg.drawType);
+							break;
+						case 'cancel-drawing':
+							cancelDrawing();
+							break;
+						case 'highlight': {
+							const el = threads.get(msg.threadId);
+							if (el) {
+								el.classList.add('highlight');
+								setTimeout(function() { el.classList.remove('highlight'); }, 2000);
+							}
+							break;
+						}
+						case 'flash': {
+							const el = threads.get(msg.threadId);
+							if (el) {
+								el.classList.remove('flash');
+								void el.offsetWidth;
+								el.classList.add('flash');
+							}
+							break;
+						}
+					}
+				}
+			});
+
+			postMsg('ready', {});
+		})();
+	</script>
+</body>
+</html>
