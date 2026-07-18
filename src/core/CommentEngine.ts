@@ -132,4 +132,13 @@ export class CommentEngine {
 	async importProject(data: ProjectData): Promise<void> {
 		await this.sync.importProject(this.threadMgr.getProjectId(), data);
 	}
+
+	/**
+	 * 导入评论到指定的工程分区（而非当前工程）。
+	 * 用于跨工程导入场景：A 导出工程 X 的评论，B 在工程 Y 下导入时，
+	 * 评论应挂到工程 X 分区下，而非当前工程 Y。
+	 */
+	async importProjectTo(projectId: string, data: ProjectData): Promise<void> {
+		await this.sync.importProject(projectId, data);
+	}
 }

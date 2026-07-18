@@ -1,3 +1,19 @@
+# 0.4.1
+
+## 新增
+
+1. **导出文件名加工程名**：`cocomment_<工程名>_<时间戳>.json`，让用户分清是哪个工程的评论
+2. **导出 JSON 注入工程元数据**：含 `projectId` / `projectName` 字段，用于导入时校验工程归属
+3. **导入工程归属校验**：如果导入的 JSON 属于另一个工程，弹窗提示用户确认，评论挂到原工程分区下（而非当前工程）
+
+## 变更
+
+- `ProjectData` 接口新增 `projectId?` / `projectName?` 可选元数据字段
+- `CommentEngine` 新增 `importProjectTo(projectId, data)` 方法，支持导入到指定工程分区
+- `PanelController.exportComments` 注入工程元数据 + 用工程名命名文件
+- `PanelController.importComments` 校验 projectId，跨工程导入时弹窗确认
+- 版本号 0.4.0 → 0.4.1
+
 # 0.4.0
 
 ## 新增

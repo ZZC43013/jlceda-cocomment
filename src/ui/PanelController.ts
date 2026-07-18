@@ -258,16 +258,28 @@ export class PanelController {
 
 	/**
 	 * 导出当前工程的所有评论为 JSON 文件。
+	 *
+	 * 文件名格式：cocomment_<工程名>_<时间戳>.json（让用户分清是哪个工程的）
+	 * JSON 内容注入 projectId / projectName 元数据，方便导入时校验工程归属。
+	 *
 	 * 用 eda.sys_FileSystem.saveFile(fileData: Blob, fileName?: string)。
-	 * 注意：saveFile 第一个参数是 Blob/File，不是字符串。
 	 */
 	async exportComments(): Promise<void> {
 		try {
+			// 获取当前工程上下文，用于文件命名和元数据注入
+			const ctx = await getCurrentProjectContext();
 			const data = await this.engine.exportProject();
+			// 注入工程元数据
+			data.projectId = ctx.projectId;
+			data.projectName = ctx.projectName;
+
 			const jsonStr = JSON.stringify(data, null, 2);
-			// 主进程没有 document.createElement('a')，用 Blob + sys_FileSystem.saveFile
 			const blob = new Blob([jsonStr], { type: 'application/json' });
-			await eda.sys_FileSystem.saveFile(blob, `cocomment_${Date.now()}.json`);
+			// 文件名：cocomment_<工程名>_<时间戳>.json
+			// 工程名可能含特殊字符，做简单清理（只保留字母数字中文下划线中划线）
+			const safeName = ctx.projectName.replace(/[\\/:*?"<>|]/g, '_');
+			const fileName = `cocomment_${safeName}_${Date.now()}.json`;
+			await eda.sys_FileSystem.saveFile(blob, fileName);
 		}
 		catch (e) {
 			console.warn('[CoComment] Export failed:', e);
@@ -276,6 +288,13 @@ export class PanelController {
 
 	/**
 	 * 从 JSON 文件导入评论。
+	 *
+	 * 导入逻辑：
+	 *   - 读取 JSON 中的 projectId 元数据
+	 *   - 如果 projectId 与当前工程不一致，弹窗提示用户确认
+	 *   - 评论挂到 JSON 中的原工程分区下（而非当前工程），保证工程归属正确
+	 *   - 如果当前正好打开的就是该工程，面板会自动刷新
+	 *
 	 * eda.sys_FileSystem.openReadFileDialog 返回 Promise<Array<File> | undefined>。
 	 */
 	async importComments(): Promise<void> {
@@ -286,12 +305,63 @@ export class PanelController {
 			}
 			const text = await files[0].text();
 			const data = JSON.parse(text) as ProjectData;
-			await this.engine.importProject(data);
-			await this.refreshThreads();
+
+			// 读取当前工程上下文
+			const ctx = await getCurrentProjectContext();
+			const targetProjectId = data.projectId ?? ctx.projectId;
+			const targetProjectName = data.projectName ?? '未知工程';
+
+			// 如果 JSON 中的工程与当前工程不一致，弹窗提示
+			if (data.projectId && data.projectId !== ctx.projectId) {
+				const confirmed = await this.confirm(
+					`该评论文件属于工程「${targetProjectName}」(${data.projectId.slice(0, 8)}...)，\n`
+					+ `当前打开的工程是「${ctx.projectName}」(${ctx.projectId.slice(0, 8)}...)。\n\n`
+					+ `导入后评论会挂到工程「${targetProjectName}」下，\n`
+					+ `需要切换到该工程才能看到这些评论。\n\n`
+					+ `是否继续导入？`,
+					'工程归属校验',
+				);
+				if (!confirmed) {
+					console.log('[CoComment] 导入已取消：用户拒绝跨工程导入');
+					return;
+				}
+				// 导入到 JSON 中的原工程分区（而非当前工程）
+				await this.engine.importProjectTo(targetProjectId, data);
+				// 当前工程不是目标工程，不需要刷新面板
+			}
+			else {
+				// 同工程导入，直接导入到当前工程并刷新
+				await this.engine.importProject(data);
+				await this.refreshThreads();
+			}
 		}
 		catch (e) {
 			console.warn('[CoComment] Import failed:', e);
 		}
+	}
+
+	/**
+	 * 弹出确认框（基于 eda.sys_Dialog.showConfirmationMessage）。
+	 * 返回 true=用户点了主按钮（确认），false=取消或 API 异常。
+	 */
+	private confirm(content: string, title?: string): Promise<boolean> {
+		return new Promise<boolean>((resolve) => {
+			try {
+				eda.sys_Dialog.showConfirmationMessage(
+					content,
+					title,
+					'确认',
+					'取消',
+					(mainButtonClicked: boolean) => {
+						resolve(mainButtonClicked === true);
+					},
+				);
+			}
+			catch (e) {
+				console.warn('[CoComment] showConfirmationMessage failed:', e);
+				resolve(false);
+			}
+		});
 	}
 
 	/**

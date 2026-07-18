@@ -25,6 +25,9 @@ export interface ProjectData {
 	threads: CommentThread[];
 	comments: Record<string, Comment[]>;
 	lastSyncedAt?: number;
+	/** 工程元数据（导出时注入，用于跨设备导入校验） */
+	projectId?: string;
+	projectName?: string;
 }
 
 export interface LocalData {
