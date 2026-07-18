@@ -3,7 +3,7 @@
 	"uuid": "df35742209c346818b65b9899677c10f",
 	"displayName": "CoComment 团队评论",
 	"description": "在原理图和PCB上直接圈选批注，支持评论线程管理、状态追踪，团队协作的设计评审利器。",
-	"version": "0.2.0",
+	"version": "0.3.0",
 	"publisher": "zhaozicong",
 	"engines": {
 		"eda": "^3.0.0"
@@ -66,35 +66,20 @@
 						"registerFn": "toggleAnnotations"
 					},
 					{
-						"id": "sch-exportComments",
-						"title": "导出评论",
-						"registerFn": "exportComments"
-					},
-					{
-						"id": "sch-importComments",
-						"title": "导入评论",
-						"registerFn": "importComments"
-					},
-					{
-						"id": "sch-syncToProject",
-						"title": "同步评论到工程",
-						"registerFn": "syncToProject"
-					},
-					{
-						"id": "sch-syncFromProject",
-						"title": "从工程读取评论",
-						"registerFn": "syncFromProject"
-					},
-					{
-						"id": "sch-restoreProjectBackup",
-						"title": "恢复工程源码",
-						"registerFn": "restoreProjectBackup"
-					},
-					{
-						"id": "sch-about",
-						"title": "关于 CoComment",
-						"registerFn": "about"
-					}
+					"id": "sch-exportComments",
+					"title": "导出评论",
+					"registerFn": "exportComments"
+				},
+				{
+					"id": "sch-importComments",
+					"title": "导入评论",
+					"registerFn": "importComments"
+				},
+				{
+					"id": "sch-about",
+					"title": "关于 CoComment",
+					"registerFn": "about"
+				}
 				]
 			}
 		],
@@ -119,35 +104,20 @@
 						"registerFn": "toggleAnnotations"
 					},
 					{
-						"id": "pcb-exportComments",
-						"title": "导出评论",
-						"registerFn": "exportComments"
-					},
-					{
-						"id": "pcb-importComments",
-						"title": "导入评论",
-						"registerFn": "importComments"
-					},
-					{
-						"id": "pcb-syncToProject",
-						"title": "同步评论到工程",
-						"registerFn": "syncToProject"
-					},
-					{
-						"id": "pcb-syncFromProject",
-						"title": "从工程读取评论",
-						"registerFn": "syncFromProject"
-					},
-					{
-						"id": "pcb-restoreProjectBackup",
-						"title": "恢复工程源码",
-						"registerFn": "restoreProjectBackup"
-					},
-					{
-						"id": "pcb-about",
-						"title": "关于 CoComment",
-						"registerFn": "about"
-					}
+					"id": "pcb-exportComments",
+					"title": "导出评论",
+					"registerFn": "exportComments"
+				},
+				{
+					"id": "pcb-importComments",
+					"title": "导入评论",
+					"registerFn": "importComments"
+				},
+				{
+					"id": "pcb-about",
+					"title": "关于 CoComment",
+					"registerFn": "about"
+				}
 				]
 			}
 		]

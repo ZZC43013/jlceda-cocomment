@@ -1,18 +1,16 @@
 # CoComment — 嘉立创EDA 团队评论批注扩展
 
-> 版本：v0.2.0
+> 版本：v0.3.0
 > 适用：嘉立创EDA专业版 / EasyEDA Pro (EDA 引擎 ^3.0.0)
-> 状态：阶段 1（本地评论 MVP）+ 阶段 2（方案B 准协同）已开发完成，待真实 EDA 环境 PoC 验证；阶段 3（实时协同）等待嘉立创开放 API
+> 状态：本地评论 MVP + 手动协同（导出/导入工作流）已开发完成；实时多人协同等待嘉立创开放 API
 
-在原理图和 PCB 画布上直接圈选区域、添加评论、追踪解决状态，类似 Figma 的评论协作能力。阶段 2 通过把评论数据序列化进工程文档源码，复用 EDA 自身的团队工程同步机制实现准协同（无需自建后端）。
+在原理图和 PCB 画布上直接圈选区域、添加评论、追踪解决状态，类似 Figma 的评论协作能力。团队协作通过 JSON 导出/导入工作流实现手动协同（A 导出 → 发给同事 → B 导入）。
 
 ---
 
 ## 一、功能列表
 
 ### 已实现
-
-#### 阶段 1 — 本地评论 MVP
 
 | 功能 | 说明 |
 |---|---|
@@ -22,25 +20,17 @@
 | 视图自动跟随 | 缩放/平移画布时批注框自动跟随（sys_Timer 轮询） |
 | 点击定位 | 在列表点线程卡片 → 画布定位到批注位置 + 闪烁高亮 |
 | 本地存储 | 评论数据存到 `eda.sys_Storage`，刷新不丢 |
-| JSON 导入导出 | 把当前工程所有评论导出为 JSON，或从 JSON 导入 |
+| JSON 导入导出 | 把当前工程所有评论导出为 JSON，或从 JSON 导入（**手动协同工作流**） |
 | 用户设置 | 修改昵称 + 选择批注颜色（8 色可选） |
 | 搜索过滤 | 按评论内容/作者名搜索，按状态（全部/未解决/已解决）过滤 |
 | 显示/隐藏批注 | 一键切换画布上所有批注框的显隐 |
 | 多行文字批注 | textarea 多行输入，6 档字号选择，Enter 换行 / Ctrl+Enter 提交 / Esc 取消 |
 
-#### 阶段 2 — 方案B 准协同
-
-| 功能 | 说明 |
-|---|---|
-| 同步评论到工程 | 把评论序列化为标记块（`%%COCOMMENT_V1:<base64>%%`）追加到 sch/pcb 文档源码末尾，靠 EDA 工程同步机制传播给团队成员 |
-| 从工程读取评论 | 从当前文档源码提取评论数据并恢复到本地存储 |
-| 恢复工程源码 | 紧急恢复，用上次同步前备份的原始源码覆盖当前文档，还原设计数据 |
-
 ### 未实现
 
 - ❌ 原理图批注（`SCH_Document` 坐标转换 API 未暴露）
 - ❌ 实时多人协同（等待嘉立创开放协作者列表、在线状态、实时光标、跨用户消息广播等 API，详见 [DEV_DOC.md](./docs/DEV_DOC.md) 阶段 3）
-- ❌ 评论附件（图片/文件上传）
+- ❌ 评论附件（图片/文件上传，EDA 无附件上传 API）
 - ❌ @ 提及
 
 ---
@@ -81,7 +71,7 @@ dist/
 
 ```
 build/dist/
-└── cocomment_v0.2.0.eext   # 嘉立创EDA扩展包（zip 格式，按 .edaignore 过滤）
+└── cocomment_v0.3.0.eext   # 嘉立创EDA扩展包（zip 格式，按 .edaignore 过滤）
 ```
 
 `.eext` 是嘉立创EDA扩展的官方打包格式，本质是 zip 压缩包，内部按 [.edaignore](./.edaignore) 规则过滤掉 `node_modules`、`src`、`.npm-cache` 等开发文件，只保留运行时所需文件。
@@ -104,9 +94,9 @@ build/dist/
 
 ### 方式 B：安装 .eext 包（发布用）
 
-1. 执行 `npm run build` 生成 `build/dist/cocomment_v0.2.0.eext`
+1. 执行 `npm run build` 生成 `build/dist/cocomment_v0.3.0.eext`
 2. 在嘉立创EDA专业版的扩展管理页面选择 **从文件安装**
-3. 选择 `cocomment_v0.2.0.eext` 文件
+3. 选择 `cocomment_v0.3.0.eext` 文件
 
 ---
 
@@ -114,18 +104,15 @@ build/dist/
 
 ### 4.1 菜单功能
 
-在原理图或 PCB 编辑器中，顶部 **CoComment** 菜单提供 9 个操作：
+在原理图或 PCB 编辑器中，顶部 **CoComment** 菜单提供 6 个操作：
 
 | 菜单项 | 功能 |
 |---|---|
 | 显示评论面板 | 切换右侧评论列表面板的显隐 |
 | 添加批注 | 打开绘制 Dialog，手绘/粘贴截图/上传图片作为批注 |
 | 显示/隐藏批注 | 切换画布上所有批注框的显隐 |
-| 导出评论 | 导出当前工程所有评论为 JSON |
-| 导入评论 | 从 JSON 文件导入评论（覆盖当前工程） |
-| 同步评论到工程 | 方案B：把评论序列化进工程文档源码，靠 EDA 工程同步机制传播（写入前弹窗确认 + 自动备份） |
-| 从工程读取评论 | 方案B：从当前文档源码提取评论数据并恢复到本地 |
-| 恢复工程源码 | 紧急恢复，用上次同步前备份的原始源码覆盖当前文档 |
+| 导出评论 | 导出当前工程所有评论为 JSON（**手动协同**：发给同事） |
+| 导入评论 | 从 JSON 文件导入评论（**手动协同**：接收同事的 JSON） |
 | 关于 CoComment | 显示版本信息 |
 
 > Home 页面只有"关于"一个菜单。
@@ -154,20 +141,23 @@ build/dist/
 6. 画布上出现批注图像 + 序号徽章
 ```
 
-### 4.4 团队协作工作流（方案B）
+### 4.4 团队协作工作流（手动协同）
 
 ```
 A 同事：
 1. 在自己的 EDA 客户端添加/修改评论
-2. 点菜单 "同步评论到工程" → 弹窗确认 → 评论写入文档源码
-3. 正常保存工程（让 EDA 工程同步机制把文档传播给团队）
+2. 点菜单 "导出评论" → 生成 cocomment_<时间戳>.json 文件
+3. 把 JSON 文件发给同事（微信/邮件/共享文件夹均可）
 
 B 同事：
-1. EDA 工程同步拉取到 A 写入的新文档
-2. 点菜单 "从工程读取评论" → 评论恢复到本地 → 面板自动刷新
+1. 收到 JSON 文件
+2. 在自己的 EDA 客户端点菜单 "导入评论" → 选择 JSON 文件
+3. 评论恢复到本地 → 面板自动刷新
 ```
 
-⚠️ 注意：方案B 是准协同（非实时），需要 A 主动同步、B 主动读取。实时多人协同（看到对方光标、评论即时推送）等待嘉立创开放 API。
+⚠️ 注意：这是手动协同（非实时），需要 A 主动导出、B 主动导入。导入会覆盖当前工程的评论。实时多人协同（看到对方光标、评论即时推送）等待嘉立创开放 API。
+
+> **为什么不用工程文档同步？** v0.2.0 曾尝试用 `eda.sys_FileManager.setDocumentSource` 把评论序列化进工程文档源码搭便车同步，但 PoC 验证 EDA 拒绝修改文档源码（返回 false）。EDA 也没有附件上传 API。因此团队协作只能走 JSON 文件交换。
 
 ---
 
@@ -202,8 +192,7 @@ pro-api-sdk/
 │   │
 │   ├── sync/                    # 存储同步层
 │   │   ├── SyncProvider.ts      # 同步接口（阶段切换时换实现）
-│   │   ├── LocalSync.ts         # 本地存储实现（基于 sys_Storage）
-│   │   └── ProjectSync.ts       # 方案B：工程文档源码双向同步（基于 sys_FileManager BETA API）
+│   │   └── LocalSync.ts         # 本地存储实现（基于 sys_Storage）
 │   │
 │   ├── types/                   # 类型定义
 │   │   ├── comment.ts           # CommentThread / Comment / BBox
@@ -232,7 +221,7 @@ pro-api-sdk/
 │       └── draw.html
 │
 └── build/dist/                  # 打包产物（build 后生成）
-    └── cocomment_v0.2.0.eext
+    └── cocomment_v0.3.0.eext
 ```
 
 ---
@@ -248,7 +237,7 @@ pro-api-sdk/
 5. **坐标换算** = `eda.pcb_Document.convertDataOriginToCanvasOrigin` / `convertCanvasOriginToDataOrigin`（逻辑坐标 ↔ 画布像素坐标）
 6. **通信** = `eda.sys_MessageBus.publish/subscribe`（主进程 ↔ iframe 双向，按 topic 路由，构造时清理旧订阅防泄漏）
 7. **存储** = `eda.sys_Storage.getExtensionUserConfig/setExtensionUserConfig`（按用户隔离，主进程可调）
-8. **方案B 同步** = `eda.sys_FileManager.getDocumentSource/setDocumentSource`（BETA API），把评论序列化为标记块追加到文档源码末尾，靠 EDA 工程同步机制传播
+8. **团队协作** = JSON 文件导入导出（`eda.sys_FileSystem.saveFile/openReadFileDialog`），手动协同工作流
 
 详见 [docs/DEV_DOC.md](./docs/DEV_DOC.md)。
 
@@ -265,7 +254,7 @@ pro-api-sdk/
 [CoComment] ensureInitialized() done
 ```
 
-**重点排查 4 个可能失败的点**：
+**重点排查 3 个可能失败的点**：
 
 1. **`eda.sys_IFrame.openIFrame` 行为**
    预期打开的是带标题栏的 Dialog 窗口（不是透明覆盖层）。如果弹出的窗口是空白，检查 [src/iframe/draw.html](./src/iframe/draw.html) 内的 onerror 错误提示框。
@@ -273,10 +262,7 @@ pro-api-sdk/
 2. **消息是否重复触发**
    发送一条评论后看控制台日志次数。如果每条消息触发多次，可能是旧订阅未清理，检查 `globalThis.__cocomment_messagebus_tasks__` 是否被正确维护（见 [src/ui/MessageBridge.ts](./src/ui/MessageBridge.ts)）。
 
-3. **方案B 是否破坏设计数据** ⚠️ 重点
-   执行"同步评论到工程"前，先用 F12 控制台确认 `eda.sys_FileManager.getDocumentSource()` 能正常返回源码。同步后立即检查 sch/pcb 文档是否还能正常编辑。如果损坏，用"恢复工程源码"菜单还原。
-
-4. **iframe 路径**
+3. **iframe 路径**
    控制台看 panel.html / draw.html 是否 404。当前用 `./iframe/xxx.html`（相对 index.js 所在目录）。
 
 如果遇到问题，把 F12 控制台的 `[CoComment]` 日志和报错贴出来排查。

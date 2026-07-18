@@ -1,3 +1,15 @@
+# 0.3.0
+
+## 变更
+
+1. **移除方案B（工程文档同步）**：PoC 验证 `eda.sys_FileManager.setDocumentSource` 返回 false，EDA 拒绝修改文档源码（标记块注入破坏源码格式解析）。方案B 不可行，已移除相关代码
+2. **删除 `src/sync/ProjectSync.ts`** 模块（标记块注入/提取、原始源码备份、紧急恢复）
+3. **移除三个菜单项**（sch + pcb）：同步评论到工程 / 从工程读取评论 / 恢复工程源码
+4. **移除 `PanelController` 中的方案B 方法**：syncToProject / syncFromProject / restoreProjectBackup / confirm / showSyncResult
+5. **团队协作改为导出/导入工作流**：A 同事用"导出评论"生成 JSON → 发给同事 → B 同事用"导入评论"恢复。纯靠文件交换，不修改工程文档源码
+6. **确认 EDA 无附件上传 API**：已查全部 DMT_*/SYS_FileSystem 类，均无云端附件上传能力。实时多人协同仍需等待嘉立创开放 API 或自建 WebSocket 后端
+7. 版本号 0.2.0 → 0.3.0
+
 # 0.2.0
 
 ## 新增

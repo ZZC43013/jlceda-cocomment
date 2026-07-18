@@ -1,6 +1,6 @@
 # CoComment — 嘉立创EDA团队协作评论扩展 开发文档
 
-> 版本：v0.2.0
+> 版本：v0.3.0
 > 最后更新：2026-07-17
 > 项目路径：`pro-api-sdk/`（基于嘉立创EDA pro-api-sdk 脚手架开发）
 
@@ -28,52 +28,54 @@
 ```
 ┌─────────────┐    ┌──────────────┐    ┌──────────────────┐
 │  阶段 1      │ →  │  阶段 2      │ →  │  阶段 3          │
-│  本地评论    │    │  准协同       │    │  实时多人协同     │
-│  (MVP)      │    │  (方案B)     │    │  (WebSocket)    │
+│  本地评论    │    │  手动协同     │    │  实时多人协同     │
+│  (MVP)      │    │  (JSON导入导出)│    │  (WebSocket)    │
 └─────────────┘    └──────────────┘    └──────────────────┘
   ✅ 已完成          ✅ 已完成            ⏳ 等待嘉立创开放API
 ```
 
 | 阶段 | 名称 | 核心能力 | 状态 |
 |---|---|---|---|
-| 1 | 本地评论 MVP | 批注框 + 评论 CRUD + 本地存储 + 跳转定位 + JSON 导入导出 | ✅ 已完成 |
-| 2 | 准协同（方案B） | 评论数据序列化进工程文档源码，靠 EDA 工程同步机制传播 | ✅ 已完成 |
+| 1 | 本地评论 MVP | 批注框 + 评论 CRUD + 本地存储 + 跳转定位 | ✅ 已完成 |
+| 2 | 手动协同 | JSON 文件导入导出工作流（A 导出 → 发给同事 → B 导入） | ✅ 已完成 |
 | 3 | 实时协同 | WebSocket 推送 + 多人光标 + 实时评论 + 操作冲突处理 | ⏳ 等待嘉立创开放API |
 
 ### 阶段 1 — 本地评论 MVP（已完成）
-- ✅ 原理图/PCB 批注框绘制（透明 iframe 覆盖层）
+- ✅ 批注绘制（draw Dialog：手绘/粘贴截图/上传图片）
 - ✅ 评论线程管理（增删改查、未解决/已解决状态）
 - ✅ 本地数据存储（sys_Storage）
-- ✅ JSON 文件导入导出
 - ✅ 点击评论跳转到对应位置并高亮
 - ✅ 右侧评论列表面板
-- ✅ 批注工具栏
+- ✅ 多行文字批注（textarea + 6 档字号）
 
-### 阶段 2 — 准协同 / 方案B（已完成）
+### 阶段 2 — 手动协同 / JSON 导入导出（已完成）
 
-**核心思路**：把评论数据序列化为标记块（`%%COCOMMENT_V1:<base64>%%`）追加到当前 sch/pcb 文档源码末尾，靠 EDA 自身的工程同步机制传播给团队成员。团队成员打开同一工程后调"从工程读取评论"即可恢复。
+**核心思路**：通过 JSON 文件交换实现跨设备、跨用户的评论共享。A 同事导出 JSON → 发给同事 → B 同事导入 JSON。
 
-**为什么不走自建后端**：嘉立创EDA专业版本身支持团队工程协作（`EDMT_ProjectCollaborationMode`：FREE/STRICT 模式），工程文档会自动在团队成员间同步。把评论数据"搭便车"注入文档源码，无需自建后端即可实现跨设备、跨用户的评论传播。
+**实现**：`PanelController.exportComments()` / `importComments()`，基于：
+- `eda.sys_FileSystem.saveFile(blob, fileName)` — 导出 JSON 文件
+- `eda.sys_FileSystem.openReadFileDialog(['.json'])` — 导入 JSON 文件
 
-**实现**：`src/sync/ProjectSync.ts`，基于两个 BETA API：
-- `eda.sys_FileManager.getDocumentSource()` — 读取当前文档源码
-- `eda.sys_FileManager.setDocumentSource(source)` — 写回修改后的源码
+**工作流**：
+```
+A 同事：添加/修改评论 → 点"导出评论" → 生成 cocomment_<时间戳>.json → 发给同事
+B 同事：收到 JSON → 点"导入评论" → 选择文件 → 评论恢复到本地
+```
 
-**安全设计**：
-- 标记块只追加在源码末尾，不修改原始设计数据
-- base64 内容仅含 `[A-Za-z0-9+/=]`，不破坏源码字符串
-- syncToProject 前自动备份原始源码到 `sys_Storage`
-- 写入前弹窗确认，异常时可用"恢复工程源码"菜单还原
+**限制**：
+- 非实时，需要 A 主动导出、B 主动导入
+- 导入会覆盖当前工程的评论（无合并机制）
+- 无冲突解决，多人同时修改需协调导出顺序
 
-**菜单项**（sch + pcb 各一组）：
-- 同步评论到工程（`syncToProject`）
-- 从工程读取评论（`syncFromProject`）
-- 恢复工程源码（`restoreProjectBackup`）
+### ~~方案B：工程文档同步~~（已废弃）
 
-**已知风险**（需 PoC 验证）：
-- `setDocumentSource` 是 BETA API，行为可能不稳定
-- 若 EDA 文档源码是严格 JSON，末尾追加非 JSON 内容可能导致解析失败
-- 多人同时 syncToProject 会产生覆盖冲突（无锁机制）
+> **v0.2.0 曾尝试，v0.3.0 移除**
+
+**原思路**：把评论数据序列化为标记块（`%%COCOMMENT_V1:<base64>%%`）追加到 sch/pcb 文档源码末尾，靠 EDA 自身的工程同步机制传播。
+
+**废弃原因**：PoC 验证 `eda.sys_FileManager.setDocumentSource` 返回 false，EDA 拒绝修改文档源码（标记块注入破坏源码格式解析）。方案B 不可行。
+
+**附件上传 API 调研结论**：已查全部 `DMT_*`（Project/Folder/Board/Team/Workspace）和 `SYS_FileSystem` 类，均无云端附件上传能力。`SYS_FileSystem.saveFile` 仅保存到本地，`saveFileToFileSystem` 仅写入本地文件系统。EDA 没有附件上传 API。
 
 ### 阶段 3 — 实时协同（⏳ 等待嘉立创开放API）
 
@@ -87,12 +89,13 @@
 | 冲突解决 / 操作日志 | 多人同时编辑同一 thread 无法自动合并 | 无 |
 | 共享 KV 存储 | 无工程级别的共享键值存储（仅 `sys_Storage` 按用户隔离） | `eda.sys_Storage` 是用户私有 |
 | 邀请 / 移除协作者 | 无法在扩展内管理工程成员 | 无 |
+| 附件上传 | 无云端附件上传 API | `SYS_FileSystem` 仅本地文件操作 |
 
 **可用的外部通信能力**（可用于自建协作通道，但需要自建服务器）：
 - `eda.sys_WebSocket` — 原生 WebSocket 客户端
 - `eda.sys_ClientUrl` — 获取客户端 URL 信息
 
-**等待清单**：待嘉立创开放上述 API 后，本扩展可演进为真正的实时多人协同评论工具。在此之前，团队协作通过阶段2的方案B（评论随工程文档同步）实现准协同。
+**等待清单**：待嘉立创开放上述 API 后，本扩展可演进为真正的实时多人协同评论工具。在此之前，团队协作通过阶段2的 JSON 导入导出实现手动协同。
 
 ---
 
@@ -136,9 +139,9 @@
 │         (getExtensionUserConfig/                │             │
 │          setExtensionUserConfig，按用户隔离)    │             │
 │                                                │             │
-│         方案B 同步: ProjectSync                 │             │
-│         (eda.sys_FileManager.getDocumentSource/ │             │
-│          setDocumentSource BETA API)            │             │
+│         团队协作: JSON 导入导出                  │             │
+│         (eda.sys_FileSystem.saveFile/           │             │
+│          openReadFileDialog，手动协同工作流)     │             │
 └─────────────────────────────────────────────────────────────┘
 ```
 
@@ -147,8 +150,7 @@
 - `IframeManager` — 基于 `sys_IFrame` 的窗口管理（panel/overlay/draw，用 id 管理）
 - `MessageBridge` — 基于 `sys_MessageBus` 的跨 context 通信桥（构造时清理旧订阅防泄漏）
 - `AnnotationRenderer` — 视图轮询 + 坐标换算 + 通过回调发渲染指令（不依赖 ISyncProvider，不发 CustomEvent）
-- `PanelController` — 业务编排 + 消息路由 + 方案B同步入口（注入 ProjectSync）
-- `ProjectSync` — 方案B：评论数据与工程文档源码双向同步（标记块注入）
+- `PanelController` — 业务编排 + 消息路由 + 导入导出（手动协同工作流）
 - `types/messages.ts` — 统一消息协议类型定义（PanelMessage / OverlayMessage / DrawMessage / Inbound）
 
 ### 3.2 完整架构（阶段3）
@@ -186,8 +188,7 @@ pro-api-sdk/
 │   │
 │   ├── sync/                    # 存储同步层
 │   │   ├── SyncProvider.ts      # 同步提供者接口
-│   │   ├── LocalSync.ts         # 本地存储实现（阶段1，基于 sys_Storage）
-│   │   └── ProjectSync.ts       # 方案B：工程文档源码双向同步（基于 sys_FileManager BETA API）
+│   │   └── LocalSync.ts         # 本地存储实现（阶段1，基于 sys_Storage）
 │   │
 │   ├── types/                   # 类型定义
 │   │   ├── comment.ts           # CommentThread / Comment / BBox
@@ -515,7 +516,7 @@ AnnotationRenderer.addThread(thread) 渲染到画布
 
 ### 8.3 工具栏入口
 
-- 顶部菜单（sch/pcb）：`CoComment → 显示评论面板 / 添加批注 / 显示隐藏批注 / 导出评论 / 导入评论 / 同步评论到工程 / 从工程读取评论 / 恢复工程源码 / 关于 CoComment`
+- 顶部菜单（sch/pcb）：`CoComment → 显示评论面板 / 添加批注 / 显示隐藏批注 / 导出评论 / 导入评论 / 关于 CoComment`
 - 顶部菜单（home）：`CoComment → 关于 CoComment`
 - 右侧面板常驻开关
 
@@ -542,11 +543,8 @@ AnnotationRenderer.addThread(thread) 渲染到画布
 | `eda.sys_Storage.getExtensionUserConfig` | `getExtensionUserConfig(key): any` (同步) | 读取扩展用户配置 | LocalSync（评论数据持久化） |
 | `eda.sys_Storage.setExtensionUserConfig` | `setExtensionUserConfig(key, value): Promise<void>` (异步) | 写入扩展用户配置 | LocalSync |
 | `eda.sys_Dialog.showInformationMessage` | `showInformationMessage(message, title?): Promise<void>` | 信息提示对话框 | index.ts `about()` |
-| `eda.sys_Dialog.showConfirmationMessage` | `showConfirmationMessage(content, title?, mainButtonTitle?, buttonTitle?, callbackFn): void` | 确认对话框（回调返回是否点主按钮） | PanelController `confirm()`（方案B写入前确认） |
-| `eda.sys_FileManager.getDocumentSource` | `getDocumentSource(): Promise<string \| undefined>` (BETA) | 获取当前文档源码 | ProjectSync `syncFromProject()` |
-| `eda.sys_FileManager.setDocumentSource` | `setDocumentSource(source: string): Promise<boolean>` (BETA) | 修改当前文档源码 | ProjectSync `syncToProject()` |
-| `eda.sys_FileSystem.saveFile` | `saveFile(fileData: File \| Blob, fileName?: string): Promise<void>` | 保存文件（触发浏览器下载） | PanelController `exportComments()` |
-| `eda.sys_FileSystem.openReadFileDialog` | `openReadFileDialog(filenameExtensions?, multiFiles?): Promise<Array<File> \| undefined>` | 打开文件读取对话框 | PanelController `importComments()` |
+| `eda.sys_FileSystem.saveFile` | `saveFile(fileData: File \| Blob, fileName?: string): Promise<void>` | 保存文件（触发浏览器下载） | PanelController `exportComments()`（手动协同导出） |
+| `eda.sys_FileSystem.openReadFileDialog` | `openReadFileDialog(filenameExtensions?, multiFiles?): Promise<Array<File> \| undefined>` | 打开文件读取对话框 | PanelController `importComments()`（手动协同导入） |
 | `eda.sys_Timer.setIntervalTimer` | `setIntervalTimer(id: string, timeout: number, callFn, ...args): boolean` | 循环定时器（主进程无 setInterval） | AnnotationRenderer 视图轮询 |
 | `eda.sys_Timer.clearIntervalTimer` | `clearIntervalTimer(id: string): boolean` | 清除循环定时器 | AnnotationRenderer |
 | `eda.sys_Window.getViewportSize` | `getViewportSize(): { width: number; height: number }` | 获取视口大小（主进程无 window.innerWidth） | AnnotationRenderer（需 EDA v3.2.162+） |
@@ -611,13 +609,11 @@ AnnotationRenderer.addThread(thread) 渲染到画布
 2. **坐标转换性能**：每个 thread 每次轮询需要 2 次 `convertDataOriginToCanvasOrigin` 调用
    （bbox 两个角点），thread 数量多时可能影响性能。当前轮询间隔 250ms，可调。
 
-3. **方案B 文档源码兼容性**：`setDocumentSource` 是 BETA API，标记块追加在源码末尾。
-   若 EDA 文档源码是严格 JSON，末尾追加非 JSON 内容可能导致解析失败。需 PoC 验证
-   是否破坏设计数据。异常时可用"恢复工程源码"菜单还原。
+3. **EDA 版本要求**：`eda.sys_Window.getViewportSize()` 需要 EDA v3.2.162+。
 
-4. **EDA 版本要求**：`eda.sys_Window.getViewportSize()` 需要 EDA v3.2.162+。
+4. **原理图支持**：`SCH_Document` 类型定义未暴露坐标转换方法，原理图批注暂不支持。
 
-5. **原理图支持**：`SCH_Document` 类型定义未暴露坐标转换方法，原理图批注暂不支持。
+5. **手动协同限制**：JSON 导入会覆盖当前工程的评论（无合并机制），多人协作需协调导出顺序。
 
 ---
 
@@ -657,16 +653,14 @@ AnnotationRenderer.addThread(thread) 渲染到画布
 | ✨ destroy 清理 iframe | P2 | 卸载时移除兜底 iframe DOM，避免泄漏 |
 | 🧪 PoC 验证 | 🟡 进行中 | 待在实际 EDA 环境中安装验证 |
 
-### 10.2 阶段 2 — 准协同 / 方案B（已完成）
+### 10.2 阶段 2 — 手动协同 / JSON 导入导出（已完成）
 
 | 子任务 | 状态 | 完成日期 | 说明 |
 |---|---|---|---|
-| ProjectSync 实现 | ✅ 已完成 | 2026-07-17 | 标记块注入策略，base64 编码，Buffer/btoa/hex 三级降级 |
-| PanelController 集成 | ✅ 已完成 | 2026-07-17 | syncToProject/syncFromProject/restoreProjectBackup + 确认弹窗 |
-| 菜单项注册 | ✅ 已完成 | 2026-07-17 | sch + pcb 各三项菜单（同步/读取/恢复） |
-| 原始源码备份 | ✅ 已完成 | 2026-07-17 | syncToProject 前自动备份到 sys_Storage，支持恢复 |
-| 紧急恢复机制 | ✅ 已完成 | 2026-07-17 | "恢复工程源码"菜单可还原到写入前状态 |
-| 🧪 PoC 验证 | 🟡 进行中 | - | 待在 EDA 环境验证 setDocumentSource 是否破坏设计数据 |
+| 导出评论 | ✅ 已完成 | 2026-07-17 | `eda.sys_FileSystem.saveFile` 导出 JSON |
+| 导入评论 | ✅ 已完成 | 2026-07-17 | `eda.sys_FileSystem.openReadFileDialog` 读取 JSON |
+| 菜单项注册 | ✅ 已完成 | 2026-07-17 | sch + pcb 各两项菜单（导出/导入） |
+| ~~方案B 工程文档同步~~ | ❌ 已废弃 | 2026-07-17 | PoC 验证 setDocumentSource 返回 false，EDA 拒绝修改文档源码。已移除 ProjectSync.ts |
 
 ### 10.3 阶段 3 — 实时协同（⏳ 等待嘉立创开放API）
 
@@ -684,12 +678,11 @@ AnnotationRenderer.addThread(thread) 渲染到画布
 
 | 风险 | 等级 | 应对 |
 |---|---|---|
-| 方案B 破坏设计数据 | 🔴 高 | `setDocumentSource` 是 BETA API，标记块注入可能破坏文档源码解析。syncToProject 前自动备份原始源码，异常时可用"恢复工程源码"菜单还原。PoC 阶段重点验证 |
 | 坐标换算不准确 | 🔴 高 | PoC 阶段重点验证 annotation iframe 定位精度，准备轮询兜底方案 |
-| 多人同时 syncToProject 覆盖冲突 | 🟡 中 | 方案B 无锁机制，多人同时同步会互相覆盖。建议团队约定由一人负责同步 |
+| JSON 导入覆盖评论 | 🟡 中 | 导入会覆盖当前工程的评论（无合并机制），需在 UI 提示用户确认 |
 | 部分 EDA API 不可用 | 🟡 中 | 准备替代方案（轮询代替事件等） |
 | 大数据量性能问题 | 🟢 低 | 虚拟滚动 + Canvas 渲染（后续优化） |
-| 扩展审核被拒 | 🟡 中 | 严格遵守扩展开发规范；方案B 会修改用户文档源码，需在审核说明中明确告知用户风险 |
+| 扩展审核被拒 | 🟡 中 | 严格遵守扩展开发规范，不修改用户设计数据 |
 
 ---
 

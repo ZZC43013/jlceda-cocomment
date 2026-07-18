@@ -5,7 +5,6 @@ import type { IframeManager } from './IframeManager';
 import type { MessageBridge } from './MessageBridge';
 import type { ProjectData } from '../types/sync';
 import type { PanelInboundMessage, DrawInboundMessage } from '../types/messages';
-import { ProjectSync, type SyncResult } from '../sync/ProjectSync';
 
 /**
  * PanelController — 业务编排 + 消息路由中枢。
@@ -21,18 +20,16 @@ export class PanelController {
 	private renderer: AnnotationRenderer;
 	private iframes: IframeManager;
 	private bridge: MessageBridge;
-	private projectSync: ProjectSync;
 	private annotationVisible = true;
 	private refreshTimer: number | null = null;
 	/** draw:complete 的回调，由 startDrawing 设置，handleDrawMessage 触发 */
 	private drawResolve: ((result: { image: string; width: number; height: number } | null) => void) | null = null;
 
-	constructor(engine: CommentEngine, renderer: AnnotationRenderer, iframes: IframeManager, bridge: MessageBridge, projectSync?: ProjectSync) {
+	constructor(engine: CommentEngine, renderer: AnnotationRenderer, iframes: IframeManager, bridge: MessageBridge) {
 		this.engine = engine;
 		this.renderer = renderer;
 		this.iframes = iframes;
 		this.bridge = bridge;
-		this.projectSync = projectSync ?? new ProjectSync();
 	}
 
 	async init(): Promise<void> {
@@ -263,146 +260,6 @@ export class PanelController {
 		}
 		catch (e) {
 			console.warn('[CoComment] Import failed:', e);
-		}
-	}
-
-	// ============ 方案B：评论数据与工程文档双向同步 ============
-	//
-	// 思路：把评论数据序列化为标记块（%%COCOMMENT_V1:<base64>%%）追加到当前
-	// sch/pcb 文档源码末尾，靠 EDA 自身的工程同步机制传播给团队成员。
-	// 团队成员打开同一工程后调 syncFromProject 即可恢复评论。
-	//
-	// 实现：ProjectSync.ts（基于 eda.sys_FileManager.getDocumentSource /
-	//   setDocumentSource 两个 BETA API）。
-	//
-	// ⚠️ 风险：setDocumentSource 是 BETA API，且会修改实际文档源码。虽然只在
-	// 末尾追加标记块且自动备份原始源码，但仍有可能破坏设计数据。调用前弹窗确认。
-
-	/**
-	 * 把当前工程所有评论写入工程文档源码（标记块注入）。
-	 * 写入前会自动备份原始源码到 sys_Storage，并弹窗让用户确认风险。
-	 */
-	async syncToProject(): Promise<void> {
-		console.log('[CoComment] syncToProject() called');
-		const confirmed = await this.confirm(
-			'即将把当前所有评论写入工程文档源码（通过 setDocumentSource BETA API）。\n\n'
-			+ '这会修改当前 sch/pcb 文档：在源码末尾追加评论数据标记块。\n'
-			+ '已自动备份原始源码，异常时可用"恢复工程源码"菜单还原。\n'
-			+ '团队成员打开本工程后可通过"从工程读取评论"恢复。\n\n'
-			+ '是否继续？',
-			'同步评论到工程',
-		);
-		if (!confirmed) {
-			console.log('[CoComment] syncToProject cancelled by user');
-			return;
-		}
-		try {
-			const data = await this.engine.exportProject();
-			const result = await this.projectSync.syncToProject(data);
-			this.showSyncResult(result, '同步到工程');
-		}
-		catch (e) {
-			console.warn('[CoComment] syncToProject failed:', e);
-			this.showSyncResult(
-				{ success: false, message: 'syncToProject 异常: ' + (e instanceof Error ? e.message : String(e)) },
-				'同步到工程',
-			);
-		}
-	}
-
-	/**
-	 * 从工程文档源码读取评论数据，并合并到本地存储。
-	 * 读取成功后会覆盖当前工程的评论数据并刷新面板。
-	 */
-	async syncFromProject(): Promise<void> {
-		console.log('[CoComment] syncFromProject() called');
-		try {
-			const result = await this.projectSync.syncFromProject();
-			if (result.success && result.data) {
-				// 读取成功，导入到本地存储并刷新
-				await this.engine.importProject(result.data);
-				await this.refreshThreads();
-			}
-			this.showSyncResult(result, '从工程读取');
-		}
-		catch (e) {
-			console.warn('[CoComment] syncFromProject failed:', e);
-			this.showSyncResult(
-				{ success: false, message: 'syncFromProject 异常: ' + (e instanceof Error ? e.message : String(e)) },
-				'从工程读取',
-			);
-		}
-	}
-
-	/**
-	 * 紧急恢复：用上次 syncToProject 备份的原始源码覆盖当前文档源码。
-	 * 恢复后评论标记块会丢失，但设计数据回到写入前状态。
-	 */
-	async restoreProjectBackup(): Promise<void> {
-		console.log('[CoComment] restoreProjectBackup() called');
-		const confirmed = await this.confirm(
-			'即将用上次"同步到工程"前备份的原始源码覆盖当前文档源码。\n\n'
-			+ '这会清除当前文档中的评论标记块，把设计数据恢复到写入前状态。\n'
-			+ '本机的评论数据（sys_Storage）不受影响。\n\n'
-			+ '是否继续？',
-			'恢复工程源码',
-		);
-		if (!confirmed) {
-			return;
-		}
-		try {
-			const result = await this.projectSync.restoreBackup();
-			this.showSyncResult(result, '恢复工程源码');
-		}
-		catch (e) {
-			console.warn('[CoComment] restoreProjectBackup failed:', e);
-			this.showSyncResult(
-				{ success: false, message: 'restoreBackup 异常: ' + (e instanceof Error ? e.message : String(e)) },
-				'恢复工程源码',
-			);
-		}
-	}
-
-	/**
-	 * 弹出确认框（基于 eda.sys_Dialog.showConfirmationMessage）。
-	 * 返回 true=用户点了主按钮（确认），false=取消或 API 异常。
-	 */
-	private confirm(content: string, title?: string): Promise<boolean> {
-		return new Promise<boolean>((resolve) => {
-			try {
-				eda.sys_Dialog.showConfirmationMessage(
-					content,
-					title,
-					'确认',
-					'取消',
-					(mainButtonClicked: boolean) => {
-						resolve(mainButtonClicked === true);
-					},
-				);
-			}
-			catch (e) {
-				console.warn('[CoComment] showConfirmationMessage failed:', e);
-				// API 异常时默认拒绝，保护用户数据
-				resolve(false);
-			}
-		});
-	}
-
-	/**
-	 * 展示 ProjectSync 操作结果。
-	 */
-	private showSyncResult(result: SyncResult, title: string): void {
-		const icon = result.success ? '✅' : '❌';
-		try {
-			eda.sys_Dialog.showInformationMessage(
-				`${icon} ${result.message}`,
-				title,
-				'知道了',
-			);
-		}
-		catch (e) {
-			console.warn('[CoComment] showInformationMessage failed:', e);
-			console.log(`[CoComment] ${title}: ${icon} ${result.message}`);
 		}
 	}
 
