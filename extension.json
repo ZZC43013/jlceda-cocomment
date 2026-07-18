@@ -3,7 +3,7 @@
 	"uuid": "df35742209c346818b65b9899677c10f",
 	"displayName": "CoComment 团队评论",
 	"description": "在原理图和PCB上直接圈选批注，支持评论线程管理、状态追踪，团队协作的设计评审利器。",
-	"version": "0.3.0",
+	"version": "0.4.0",
 	"publisher": "zhaozicong",
 	"engines": {
 		"eda": "^3.0.0"

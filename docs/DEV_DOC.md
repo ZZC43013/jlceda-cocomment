@@ -1,6 +1,6 @@
 # CoComment — 嘉立创EDA团队协作评论扩展 开发文档
 
-> 版本：v0.3.0
+> 版本：v0.4.0
 > 最后更新：2026-07-17
 > 项目路径：`pro-api-sdk/`（基于嘉立创EDA pro-api-sdk 脚手架开发）
 
@@ -47,6 +47,7 @@
 - ✅ 点击评论跳转到对应位置并高亮
 - ✅ 右侧评论列表面板
 - ✅ 多行文字批注（textarea + 6 档字号）
+- ✅ **按工程隔离评论区**（v0.4.0 新增：通过 `sys_DocumentTree.getCurrentProjectInfo` 获取工程 UUID 作为 projectId）
 
 ### 阶段 2 — 手动协同 / JSON 导入导出（已完成）
 
@@ -199,7 +200,8 @@ pro-api-sdk/
 │   └── utils/                   # 工具函数
 │       ├── coord.ts             # 坐标换算（逻辑坐标 ↔ 屏幕坐标）
 │       ├── id.ts                # UUID 生成
-│       └── i18n.ts              # 多语言（zh-Hans）
+│       ├── i18n.ts              # 多语言（zh-Hans）
+│       └── ProjectContext.ts    # 工程上下文获取（工程 UUID / 名称 / 页面类型）
 │
 ├── config/                      # 构建配置
 │   ├── esbuild.common.ts        # esbuild 公共配置
@@ -545,6 +547,7 @@ AnnotationRenderer.addThread(thread) 渲染到画布
 | `eda.sys_Dialog.showInformationMessage` | `showInformationMessage(message, title?): Promise<void>` | 信息提示对话框 | index.ts `about()` |
 | `eda.sys_FileSystem.saveFile` | `saveFile(fileData: File \| Blob, fileName?: string): Promise<void>` | 保存文件（触发浏览器下载） | PanelController `exportComments()`（手动协同导出） |
 | `eda.sys_FileSystem.openReadFileDialog` | `openReadFileDialog(filenameExtensions?, multiFiles?): Promise<Array<File> \| undefined>` | 打开文件读取对话框 | PanelController `importComments()`（手动协同导入） |
+| `eda.sys_DocumentTree.getCurrentProjectInfo` | `getCurrentProjectInfo(): Promise<IDMT_ProjectItem \| undefined>` | 获取当前工程的详细属性（含 uuid / friendlyName / teamUuid） | `utils/ProjectContext.ts` 工程隔离 |
 | `eda.sys_Timer.setIntervalTimer` | `setIntervalTimer(id: string, timeout: number, callFn, ...args): boolean` | 循环定时器（主进程无 setInterval） | AnnotationRenderer 视图轮询 |
 | `eda.sys_Timer.clearIntervalTimer` | `clearIntervalTimer(id: string): boolean` | 清除循环定时器 | AnnotationRenderer |
 | `eda.sys_Window.getViewportSize` | `getViewportSize(): { width: number; height: number }` | 获取视口大小（主进程无 window.innerWidth） | AnnotationRenderer（需 EDA v3.2.162+） |
@@ -632,6 +635,7 @@ AnnotationRenderer.addThread(thread) 渲染到画布
 | 🖥️ UI 面板层 | ✅ 已完成 | 2026-07-17 | panel.html + PanelController |
 | 🧭 导航定位 | ✅ 已完成 | 2026-07-17 | Navigator（跳转 + 高亮 + 面板闪烁联动） |
 | 🚪 入口集成 | ✅ 已完成 | 2026-07-17 | index.ts + extension.json 菜单 |
+| 🏷️ 按工程隔离 | ✅ 已完成 | 2026-07-17 | ProjectContext.ts + sys_DocumentTree.getCurrentProjectInfo |
 | ✅ 编译验证 | ✅ 已完成 | 2026-07-17 | esbuild 编译通过，dist 产出正确 |
 
 #### 10.1.1 本地批注功能完善（2026-07-17 第二轮）

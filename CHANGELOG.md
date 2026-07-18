@@ -1,3 +1,19 @@
+# 0.4.0
+
+## 新增
+
+1. **按工程隔离评论区**：每个工程有独立的评论区，互不干扰
+2. **自动识别当前工程**：通过 `eda.sys_DocumentTree.getCurrentProjectInfo()` 获取工程 UUID 作为 projectId
+3. **工程切换检测**：在 togglePanel / addAnnotation 入口检查工程是否切换，自动重载当前工程的评论
+4. 新增 `src/utils/ProjectContext.ts` 模块：封装工程上下文获取逻辑，含 fallback 兜底
+
+## 变更
+
+- 修复 `ThreadManager.projectId` 永远为 `'default'` 的问题：所有工程的评论之前都堆在一起
+- `ensureInitialized` 中调用 `getCurrentProjectContext` 设置真实的工程 UUID 到 engine
+- `PanelController` 新增 `checkProjectSwitched` 方法，在 togglePanel/startDrawing 入口检测工程切换
+- 版本号 0.3.0 → 0.4.0
+
 # 0.3.0
 
 ## 变更

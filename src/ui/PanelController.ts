@@ -5,6 +5,7 @@ import type { IframeManager } from './IframeManager';
 import type { MessageBridge } from './MessageBridge';
 import type { ProjectData } from '../types/sync';
 import type { PanelInboundMessage, DrawInboundMessage } from '../types/messages';
+import { getCurrentProjectContext } from '../utils/ProjectContext';
 
 /**
  * PanelController — 业务编排 + 消息路由中枢。
@@ -39,6 +40,34 @@ export class PanelController {
 		// overlay 由用户点击"添加批注"菜单时按需打开
 		this.setupMessageListeners();
 		await this.refreshThreads();
+	}
+
+	/** 当前工程 ID（用于检测工程切换） */
+	private currentProjectId: string | null = null;
+
+	/**
+	 * 检查工程上下文是否变化（用户切换了工程）。
+	 * 如果切换了，重新设置 engine 的 projectContext 并刷新面板。
+	 * 在 togglePanel / addAnnotation 入口调用，保证显示的是当前工程的评论。
+	 */
+	private async checkProjectSwitched(): Promise<boolean> {
+		try {
+			const ctx = await getCurrentProjectContext();
+			const engineProjectId = this.engine.getThreadManager().getProjectId();
+			// 如果 engine 持有的 projectId 与当前 EDA 工程不一致，说明工程已切换
+			if (ctx.projectId !== engineProjectId) {
+				console.log(`[CoComment] 检测到工程切换: ${engineProjectId} → ${ctx.projectId} (${ctx.projectName})`);
+				this.engine.setProjectContext(ctx.projectId, ctx.pageId, ctx.pageType);
+				this.currentProjectId = ctx.projectId;
+				await this.refreshThreads();
+				return true;
+			}
+			this.currentProjectId = ctx.projectId;
+		}
+		catch (e) {
+			console.warn('[CoComment] checkProjectSwitched 失败:', e);
+		}
+		return false;
 	}
 
 	destroy(): void {
@@ -199,6 +228,8 @@ export class PanelController {
 	 */
 	async startDrawing(): Promise<void> {
 		console.log('[CoComment] startDrawing begin');
+		// 检查工程是否切换，保证新批注挂在当前工程下
+		await this.checkProjectSwitched();
 		// 打开绘制 Dialog，等待用户完成或取消
 		const opened = await this.iframes.openDraw();
 		if (!opened) {
@@ -312,6 +343,8 @@ export class PanelController {
 	// ============ 对外暴露给 index.ts 的方法 ============
 	async togglePanel(): Promise<void> {
 		console.log('[CoComment] PanelController.togglePanel, panelOpened=' + this.iframes.isPanelVisible());
+		// 检查工程是否切换（用户可能切到另一个工程），切换了则重载评论
+		await this.checkProjectSwitched();
 		await this.iframes.togglePanel();
 		console.log('[CoComment] PanelController.togglePanel done, panelVisible=' + this.iframes.isPanelVisible());
 	}

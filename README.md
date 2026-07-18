@@ -1,10 +1,10 @@
 # CoComment — 嘉立创EDA 团队评论批注扩展
 
-> 版本：v0.3.0
+> 版本：v0.4.0
 > 适用：嘉立创EDA专业版 / EasyEDA Pro (EDA 引擎 ^3.0.0)
 > 状态：本地评论 MVP + 手动协同（导出/导入工作流）已开发完成；实时多人协同等待嘉立创开放 API
 
-在原理图和 PCB 画布上直接圈选区域、添加评论、追踪解决状态，类似 Figma 的评论协作能力。团队协作通过 JSON 导出/导入工作流实现手动协同（A 导出 → 发给同事 → B 导入）。
+在原理图和 PCB 画布上直接圈选区域、添加评论、追踪解决状态，类似 Figma 的评论协作能力。**每个工程有独立的评论区**，通过工程 UUID 自动隔离。团队协作通过 JSON 导出/导入工作流实现手动协同（A 导出 → 发给同事 → B 导入）。
 
 ---
 
@@ -19,7 +19,8 @@
 | 评论 CRUD | 在线程下添加、删除评论（仅作者可删） |
 | 视图自动跟随 | 缩放/平移画布时批注框自动跟随（sys_Timer 轮询） |
 | 点击定位 | 在列表点线程卡片 → 画布定位到批注位置 + 闪烁高亮 |
-| 本地存储 | 评论数据存到 `eda.sys_Storage`，刷新不丢 |
+| 按工程隔离 | 通过工程 UUID 自动隔离评论区，每个工程独立互不干扰 |
+| 本地存储 | 评论数据存到 `eda.sys_Storage`，按工程 UUID 分区，刷新不丢 |
 | JSON 导入导出 | 把当前工程所有评论导出为 JSON，或从 JSON 导入（**手动协同工作流**） |
 | 用户设置 | 修改昵称 + 选择批注颜色（8 色可选） |
 | 搜索过滤 | 按评论内容/作者名搜索，按状态（全部/未解决/已解决）过滤 |
@@ -71,7 +72,7 @@ dist/
 
 ```
 build/dist/
-└── cocomment_v0.3.0.eext   # 嘉立创EDA扩展包（zip 格式，按 .edaignore 过滤）
+└── cocomment_v0.4.0.eext   # 嘉立创EDA扩展包（zip 格式，按 .edaignore 过滤）
 ```
 
 `.eext` 是嘉立创EDA扩展的官方打包格式，本质是 zip 压缩包，内部按 [.edaignore](./.edaignore) 规则过滤掉 `node_modules`、`src`、`.npm-cache` 等开发文件，只保留运行时所需文件。
@@ -94,9 +95,9 @@ build/dist/
 
 ### 方式 B：安装 .eext 包（发布用）
 
-1. 执行 `npm run build` 生成 `build/dist/cocomment_v0.3.0.eext`
+1. 执行 `npm run build` 生成 `build/dist/cocomment_v0.4.0.eext`
 2. 在嘉立创EDA专业版的扩展管理页面选择 **从文件安装**
-3. 选择 `cocomment_v0.3.0.eext` 文件
+3. 选择 `cocomment_v0.4.0.eext` 文件
 
 ---
 
@@ -203,7 +204,8 @@ pro-api-sdk/
 │   └── utils/                   # 工具函数
 │       ├── coord.ts             # 坐标换算（逻辑坐标 ↔ 屏幕坐标）
 │       ├── id.ts                # UUID 生成
-│       └── i18n.ts              # 多语言（zh-Hans）
+│       ├── i18n.ts              # 多语言（zh-Hans）
+│       └── ProjectContext.ts    # 工程上下文获取（工程 UUID / 名称 / 页面类型）
 │
 ├── config/                      # 构建配置
 │   ├── esbuild.common.ts        # esbuild 公共配置
@@ -221,7 +223,7 @@ pro-api-sdk/
 │       └── draw.html
 │
 └── build/dist/                  # 打包产物（build 后生成）
-    └── cocomment_v0.3.0.eext
+    └── cocomment_v0.4.0.eext
 ```
 
 ---
@@ -237,7 +239,8 @@ pro-api-sdk/
 5. **坐标换算** = `eda.pcb_Document.convertDataOriginToCanvasOrigin` / `convertCanvasOriginToDataOrigin`（逻辑坐标 ↔ 画布像素坐标）
 6. **通信** = `eda.sys_MessageBus.publish/subscribe`（主进程 ↔ iframe 双向，按 topic 路由，构造时清理旧订阅防泄漏）
 7. **存储** = `eda.sys_Storage.getExtensionUserConfig/setExtensionUserConfig`（按用户隔离，主进程可调）
-8. **团队协作** = JSON 文件导入导出（`eda.sys_FileSystem.saveFile/openReadFileDialog`），手动协同工作流
+8. **工程隔离** = `eda.sys_DocumentTree.getCurrentProjectInfo()` 获取工程 UUID 作为 projectId，每个工程独立评论区
+9. **团队协作** = JSON 文件导入导出（`eda.sys_FileSystem.saveFile/openReadFileDialog`），手动协同工作流
 
 详见 [docs/DEV_DOC.md](./docs/DEV_DOC.md)。
 

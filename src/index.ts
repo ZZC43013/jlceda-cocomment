@@ -4,6 +4,7 @@ import { AnnotationRenderer } from './core/AnnotationRenderer';
 import { PanelController } from './ui/PanelController';
 import { IframeManager } from './ui/IframeManager';
 import { MessageBridge } from './ui/MessageBridge';
+import { getCurrentProjectContext } from './utils/ProjectContext';
 
 let engine: CommentEngine | null = null;
 let renderer: AnnotationRenderer | null = null;
@@ -23,6 +24,12 @@ async function ensureInitialized(): Promise<void> {
 
 	const user = engine.getCurrentUser();
 
+	// 获取当前工程上下文（工程 UUID / 名称 / 页面类型）
+	// 用工程 UUID 作为 projectId，让每个工程有独立的评论区
+	const ctx = await getCurrentProjectContext();
+	engine.setProjectContext(ctx.projectId, ctx.pageId, ctx.pageType);
+	console.log(`[CoComment] 工程上下文已设置: ${ctx.projectName} (${ctx.projectId})`);
+
 	// MessageBridge：基于 eda.sys_MessageBus 的跨 context 通信桥
 	// 主进程 ↔ panel/overlay iframe 都通过它收发消息，不再用 postMessage
 	bridge = new MessageBridge();
@@ -32,7 +39,7 @@ async function ensureInitialized(): Promise<void> {
 
 	// AnnotationRenderer：通过 bridge.sendToOverlay 把渲染指令转发给 overlay iframe
 	renderer = new AnnotationRenderer(
-		{ user, pageType: 'pcb' },
+		{ user, pageType: ctx.pageType },
 		(msg) => bridge!.sendToOverlay(msg),
 	);
 	await renderer.init();
