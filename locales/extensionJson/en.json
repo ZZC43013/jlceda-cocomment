@@ -1,3 +1,9 @@
 {
-	"About...": "About..."
+	"CoComment": "CoComment",
+	"关于 CoComment": "About CoComment",
+	"显示评论面板": "Show Comment Panel",
+	"添加批注": "Add Annotation",
+	"显示/隐藏批注": "Toggle Annotations",
+	"导出评论": "Export Comments",
+	"导入评论": "Import Comments"
 }

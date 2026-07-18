@@ -19,6 +19,12 @@ export interface ThreadAnchor {
 	bbox?: BBox;
 	startPoint?: Point;
 	endPoint?: Point;
+	/** 批注图像（base64 dataURL），由绘制 Dialog 生成 */
+	image?: string;
+	/** 图像宽度（px） */
+	imageWidth?: number;
+	/** 图像高度（px） */
+	imageHeight?: number;
 }
 
 export interface RelatedPrimitive {

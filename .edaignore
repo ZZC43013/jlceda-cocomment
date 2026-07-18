@@ -5,6 +5,8 @@
 /config/
 /coverage/
 /node_modules/
+/.npm-cache/
+/.npm-logs/
 /src/
 /.editorconfig
 /.gitattributes

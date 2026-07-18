@@ -1,71 +1,80 @@
 import type { CommentEngine } from '../core/CommentEngine';
-import type { CommentThread, Comment } from '../types/comment';
+import type { CommentThread, Comment, ThreadAnchor } from '../types/comment';
 import type { AnnotationRenderer } from '../core/AnnotationRenderer';
 import type { IframeManager } from './IframeManager';
+import type { MessageBridge } from './MessageBridge';
 import type { ProjectData } from '../types/sync';
-import type { PanelInboundMessage, OverlayInboundMessage } from '../types/messages';
+import type { PanelInboundMessage, DrawInboundMessage } from '../types/messages';
+import { ProjectSync, type SyncResult } from '../sync/ProjectSync';
 
 /**
  * PanelController — 业务编排 + 消息路由中枢。
  *
- * 职责（已瘦身）：
- *  - 持有 IframeManager，把渲染指令转发给 overlay iframe
- *  - 监听 panel/overlay iframe 的 message，路由到对应业务方法
- *  - 编排绘制流程（startDrawing → createThread → 通知面板 focus）
- *  - 编排导入导出
- *
- * 已抽离的职责：
- *  - iframe 创建/显隐/销毁 → IframeManager
- *  - 视图轮询/坐标换算 → AnnotationRenderer
+ * 职责:
+ *  - 持有 IframeManager（管理 sys_IFrame 窗口）和 MessageBridge（sys_MessageBus 通信）
+ *  - 监听 iframe 通过 MessageBus 发来的用户操作，路由到 CommentEngine
+ *  - 数据变更后通过 MessageBridge 推送更新到 panel/overlay iframe
+ *  - 编排绘制流程、导入导出
  */
 export class PanelController {
 	private engine: CommentEngine;
 	private renderer: AnnotationRenderer;
 	private iframes: IframeManager;
+	private bridge: MessageBridge;
+	private projectSync: ProjectSync;
 	private annotationVisible = true;
 	private refreshTimer: number | null = null;
+	/** draw:complete 的回调，由 startDrawing 设置，handleDrawMessage 触发 */
+	private drawResolve: ((result: { image: string; width: number; height: number } | null) => void) | null = null;
 
-	constructor(engine: CommentEngine, renderer: AnnotationRenderer, iframes: IframeManager) {
+	constructor(engine: CommentEngine, renderer: AnnotationRenderer, iframes: IframeManager, bridge: MessageBridge, projectSync?: ProjectSync) {
 		this.engine = engine;
 		this.renderer = renderer;
 		this.iframes = iframes;
+		this.bridge = bridge;
+		this.projectSync = projectSync ?? new ProjectSync();
 	}
 
 	async init(): Promise<void> {
-		await this.iframes.createPanel('./iframe/panel.html', 320);
-		await this.iframes.createOverlay('./iframe/annotation.html');
+		// 只设置消息监听和数据初始化，不自动打开 iframe
+		// sys_IFrame.openIFrame 创建的是 Dialog 窗口（模态），自动打开会遮挡画布
+		// panel 由用户点击"显示评论面板"菜单时打开
+		// overlay 由用户点击"添加批注"菜单时按需打开
 		this.setupMessageListeners();
 		await this.refreshThreads();
 	}
 
 	destroy(): void {
-		this.iframes.destroy();
+		void this.iframes.closeAll();
 		this.renderer.destroy();
 	}
 
 	private setupMessageListeners(): void {
-		window.addEventListener('message', (e: MessageEvent) => {
-			const msg = e.data;
-			if (!msg || typeof msg !== 'object') {
-				return;
-			}
-			if (msg.source === 'cocomment-panel') {
-				this.handlePanelMessage(msg as PanelInboundMessage);
-			}
-			else if (msg.source === 'cocomment-overlay') {
-				this.renderer.handleIframeMessage(msg as OverlayInboundMessage);
-			}
+		// 监听来自 panel iframe 的用户操作
+		this.bridge.onPanelMessage((msg) => {
+			void this.handlePanelMessage(msg);
+		});
+
+		// 监听来自 overlay iframe 的事件（绘制完成、批注点击）
+		this.bridge.onOverlayMessage((msg) => {
+			this.renderer.handleIframeMessage(msg);
+		});
+
+		// 监听来自 draw iframe 的事件（绘制完成/取消）
+		this.bridge.onDrawMessage((msg) => {
+			this.handleDrawMessage(msg);
 		});
 
 		// 数据变更 → 防抖刷新（创建 thread 时会同时触发 thread 变更和 comment 变更，合并为一次刷新）
+		// 注：主进程没有 window，但 setTimeout/clearTimeout 是 JS 全局函数，可直接使用
 		const debouncedRefresh = () => {
 			if (this.refreshTimer !== null) {
 				clearTimeout(this.refreshTimer);
 			}
-			this.refreshTimer = window.setTimeout(() => {
+			this.refreshTimer = setTimeout(() => {
 				this.refreshTimer = null;
 				void this.refreshThreads();
-			}, 50);
+			}, 50) as unknown as number;
 		};
 
 		this.engine.onThreadChange(debouncedRefresh);
@@ -73,6 +82,7 @@ export class PanelController {
 	}
 
 	private async handlePanelMessage(msg: PanelInboundMessage): Promise<void> {
+		console.log('[CoComment] panel→main msg:', msg.type);
 		switch (msg.type) {
 			case 'ready':
 			case 'request:threads':
@@ -110,11 +120,11 @@ export class PanelController {
 				break;
 
 			case 'action:export':
-				await this.handleExport();
+				await this.exportComments();
 				break;
 
 			case 'action:import':
-				await this.handleImport();
+				await this.importComments();
 				break;
 
 			case 'action:toggle-visible':
@@ -130,7 +140,7 @@ export class PanelController {
 				break;
 
 			case 'action:request-user':
-				this.iframes.sendToPanel({ type: 'user:update', user: this.engine.getCurrentUser() });
+				this.bridge.sendToPanel({ type: 'user:update', user: this.engine.getCurrentUser() });
 				break;
 		}
 	}
@@ -144,38 +154,92 @@ export class PanelController {
 		const navigator = new Navigator();
 		await navigator.jumpToThread(thread);
 		this.renderer.highlightThread(threadId);
-		this.iframes.sendToPanel({ type: 'thread:flash', threadId });
+		this.bridge.sendToPanel({ type: 'thread:flash', threadId });
 	}
 
 	/**
-	 * 启动绘制 → 创建空 thread（不带首条评论） → 通知面板 focus 输入框。
+	 * 处理 draw iframe 通过 MessageBus 发来的消息。
+	 */
+	private handleDrawMessage(msg: DrawInboundMessage): void {
+		console.log('[CoComment] draw→main msg:', msg.type);
+		switch (msg.type) {
+			case 'draw:ready':
+				// draw dialog 已就绪
+				break;
+			case 'draw:cancel':
+				// 用户取消绘制
+				if (this.drawResolve) {
+					this.drawResolve(null);
+					this.drawResolve = null;
+				}
+				void this.iframes.closeDraw();
+				break;
+			case 'draw:complete':
+				// 用户确认批注，返回 base64 图像
+				if (this.drawResolve) {
+					this.drawResolve({ image: msg.image, width: msg.width, height: msg.height });
+					this.drawResolve = null;
+				}
+				void this.iframes.closeDraw();
+				break;
+		}
+	}
+
+	/**
+	 * 添加批注 — 打开绘制 Dialog，用户手绘/粘贴截图/上传图片，
+	 * 确认后用图像作为 thread 的 anchor.image。
+	 *
+	 * 架构说明：
+	 *   原设计是通过 overlay iframe 在画布上框选矩形作为 anchor。
+	 *   但 sys_IFrame.openIFrame 创建的是模态 Dialog 窗口，不是透明覆盖层，
+	 *   无法在画布上直接绘制。改为打开独立的绘制 Dialog，用户可以：
+	 *   1. 手绘（画笔、矩形、箭头、文字标注）
+	 *   2. Ctrl+V 粘贴截图（配合系统截图工具 Win+Shift+S）
+	 *   3. 上传本地图片
+	 *   确认后画布内容保存为 base64 PNG 图像，作为 thread 的锚点图像。
+	 *
 	 * 由 index.ts 的 addAnnotation 菜单和面板 + 按钮共同调用。
 	 */
 	async startDrawing(): Promise<void> {
-		const anchor = await this.renderer.startDrawing('box');
-		if (!anchor) {
+		console.log('[CoComment] startDrawing begin');
+		// 打开绘制 Dialog，等待用户完成或取消
+		const opened = await this.iframes.openDraw();
+		if (!opened) {
+			console.warn('[CoComment] startDrawing: openDraw failed');
 			return;
 		}
+		const result = await new Promise<{ image: string; width: number; height: number } | null>((resolve) => {
+			this.drawResolve = resolve;
+		});
+		console.log('[CoComment] startDrawing result=', result ? 'got image' : 'cancelled');
+		if (!result) {
+			return;
+		}
+		// 用图像作为 anchor
+		const anchor: ThreadAnchor = {
+			type: 'box',
+			image: result.image,
+			imageWidth: result.width,
+			imageHeight: result.height,
+		};
 		const thread = await this.engine.createThread(anchor, '');
+		console.log('[CoComment] startDrawing thread created id=' + thread.id);
 		this.renderer.addThread(thread);
-		this.iframes.sendToPanel({ type: 'thread:created', thread });
+		this.bridge.sendToPanel({ type: 'thread:created', thread });
 	}
 
 	/**
 	 * 导出当前工程的所有评论为 JSON 文件。
-	 * 供 index.ts 的菜单和面板导出按钮共用。
+	 * 用 eda.sys_FileSystem.saveFile(fileData: Blob, fileName?: string)。
+	 * 注意：saveFile 第一个参数是 Blob/File，不是字符串。
 	 */
 	async exportComments(): Promise<void> {
 		try {
 			const data = await this.engine.exportProject();
 			const jsonStr = JSON.stringify(data, null, 2);
+			// 主进程没有 document.createElement('a')，用 Blob + sys_FileSystem.saveFile
 			const blob = new Blob([jsonStr], { type: 'application/json' });
-			const url = URL.createObjectURL(blob);
-			const a = document.createElement('a');
-			a.href = url;
-			a.download = `cocomment_${Date.now()}.json`;
-			a.click();
-			URL.revokeObjectURL(url);
+			await eda.sys_FileSystem.saveFile(blob, `cocomment_${Date.now()}.json`);
 		}
 		catch (e) {
 			console.warn('[CoComment] Export failed:', e);
@@ -184,42 +248,162 @@ export class PanelController {
 
 	/**
 	 * 从 JSON 文件导入评论。
-	 * 供 index.ts 的菜单和面板导入按钮共用。
+	 * eda.sys_FileSystem.openReadFileDialog 返回 Promise<Array<File> | undefined>。
 	 */
 	async importComments(): Promise<void> {
 		try {
-			const input = document.createElement('input');
-			input.type = 'file';
-			input.accept = '.json';
-			input.onchange = async () => {
-				const file = input.files?.[0];
-				if (!file) {
-					return;
-				}
-				try {
-					const text = await file.text();
-					const data = JSON.parse(text) as ProjectData;
-					await this.engine.importProject(data);
-					// refreshThreads 内部已调用 renderer.refreshAll，无需重复刷新
-					await this.refreshThreads();
-				}
-				catch (err) {
-					console.warn('[CoComment] Import parse failed:', err);
-				}
-			};
-			input.click();
+			const files = await eda.sys_FileSystem.openReadFileDialog(['.json']);
+			if (!files || files.length === 0) {
+				return;
+			}
+			const text = await files[0].text();
+			const data = JSON.parse(text) as ProjectData;
+			await this.engine.importProject(data);
+			await this.refreshThreads();
 		}
 		catch (e) {
 			console.warn('[CoComment] Import failed:', e);
 		}
 	}
 
-	private async handleExport(): Promise<void> {
-		await this.exportComments();
+	// ============ 方案B：评论数据与工程文档双向同步 ============
+	//
+	// 思路：把评论数据序列化为标记块（%%COCOMMENT_V1:<base64>%%）追加到当前
+	// sch/pcb 文档源码末尾，靠 EDA 自身的工程同步机制传播给团队成员。
+	// 团队成员打开同一工程后调 syncFromProject 即可恢复评论。
+	//
+	// 实现：ProjectSync.ts（基于 eda.sys_FileManager.getDocumentSource /
+	//   setDocumentSource 两个 BETA API）。
+	//
+	// ⚠️ 风险：setDocumentSource 是 BETA API，且会修改实际文档源码。虽然只在
+	// 末尾追加标记块且自动备份原始源码，但仍有可能破坏设计数据。调用前弹窗确认。
+
+	/**
+	 * 把当前工程所有评论写入工程文档源码（标记块注入）。
+	 * 写入前会自动备份原始源码到 sys_Storage，并弹窗让用户确认风险。
+	 */
+	async syncToProject(): Promise<void> {
+		console.log('[CoComment] syncToProject() called');
+		const confirmed = await this.confirm(
+			'即将把当前所有评论写入工程文档源码（通过 setDocumentSource BETA API）。\n\n'
+			+ '这会修改当前 sch/pcb 文档：在源码末尾追加评论数据标记块。\n'
+			+ '已自动备份原始源码，异常时可用"恢复工程源码"菜单还原。\n'
+			+ '团队成员打开本工程后可通过"从工程读取评论"恢复。\n\n'
+			+ '是否继续？',
+			'同步评论到工程',
+		);
+		if (!confirmed) {
+			console.log('[CoComment] syncToProject cancelled by user');
+			return;
+		}
+		try {
+			const data = await this.engine.exportProject();
+			const result = await this.projectSync.syncToProject(data);
+			this.showSyncResult(result, '同步到工程');
+		}
+		catch (e) {
+			console.warn('[CoComment] syncToProject failed:', e);
+			this.showSyncResult(
+				{ success: false, message: 'syncToProject 异常: ' + (e instanceof Error ? e.message : String(e)) },
+				'同步到工程',
+			);
+		}
 	}
 
-	private async handleImport(): Promise<void> {
-		await this.importComments();
+	/**
+	 * 从工程文档源码读取评论数据，并合并到本地存储。
+	 * 读取成功后会覆盖当前工程的评论数据并刷新面板。
+	 */
+	async syncFromProject(): Promise<void> {
+		console.log('[CoComment] syncFromProject() called');
+		try {
+			const result = await this.projectSync.syncFromProject();
+			if (result.success && result.data) {
+				// 读取成功，导入到本地存储并刷新
+				await this.engine.importProject(result.data);
+				await this.refreshThreads();
+			}
+			this.showSyncResult(result, '从工程读取');
+		}
+		catch (e) {
+			console.warn('[CoComment] syncFromProject failed:', e);
+			this.showSyncResult(
+				{ success: false, message: 'syncFromProject 异常: ' + (e instanceof Error ? e.message : String(e)) },
+				'从工程读取',
+			);
+		}
+	}
+
+	/**
+	 * 紧急恢复：用上次 syncToProject 备份的原始源码覆盖当前文档源码。
+	 * 恢复后评论标记块会丢失，但设计数据回到写入前状态。
+	 */
+	async restoreProjectBackup(): Promise<void> {
+		console.log('[CoComment] restoreProjectBackup() called');
+		const confirmed = await this.confirm(
+			'即将用上次"同步到工程"前备份的原始源码覆盖当前文档源码。\n\n'
+			+ '这会清除当前文档中的评论标记块，把设计数据恢复到写入前状态。\n'
+			+ '本机的评论数据（sys_Storage）不受影响。\n\n'
+			+ '是否继续？',
+			'恢复工程源码',
+		);
+		if (!confirmed) {
+			return;
+		}
+		try {
+			const result = await this.projectSync.restoreBackup();
+			this.showSyncResult(result, '恢复工程源码');
+		}
+		catch (e) {
+			console.warn('[CoComment] restoreProjectBackup failed:', e);
+			this.showSyncResult(
+				{ success: false, message: 'restoreBackup 异常: ' + (e instanceof Error ? e.message : String(e)) },
+				'恢复工程源码',
+			);
+		}
+	}
+
+	/**
+	 * 弹出确认框（基于 eda.sys_Dialog.showConfirmationMessage）。
+	 * 返回 true=用户点了主按钮（确认），false=取消或 API 异常。
+	 */
+	private confirm(content: string, title?: string): Promise<boolean> {
+		return new Promise<boolean>((resolve) => {
+			try {
+				eda.sys_Dialog.showConfirmationMessage(
+					content,
+					title,
+					'确认',
+					'取消',
+					(mainButtonClicked: boolean) => {
+						resolve(mainButtonClicked === true);
+					},
+				);
+			}
+			catch (e) {
+				console.warn('[CoComment] showConfirmationMessage failed:', e);
+				// API 异常时默认拒绝，保护用户数据
+				resolve(false);
+			}
+		});
+	}
+
+	/**
+	 * 展示 ProjectSync 操作结果。
+	 */
+	private showSyncResult(result: SyncResult, title: string): void {
+		const icon = result.success ? '✅' : '❌';
+		try {
+			eda.sys_Dialog.showInformationMessage(
+				`${icon} ${result.message}`,
+				title,
+				'知道了',
+			);
+		}
+		catch (e) {
+			console.warn('[CoComment] showInformationMessage failed:', e);
+			console.log(`[CoComment] ${title}: ${icon} ${result.message}`);
+		}
 	}
 
 	/**
@@ -235,33 +419,53 @@ export class PanelController {
 		return map;
 	}
 
-	private async refreshThreads(): Promise<void> {
-		const threads = await this.engine.getThreads();
-		const comments: Record<string, Comment[]> = {};
-		for (const t of threads) {
-			comments[t.id] = await this.engine.getComments(t.id);
-		}
-		const numbers = this.computeThreadNumbers(threads);
+	private refreshLock = false;
 
-		this.iframes.sendToPanel({
-			type: 'threads:update',
-			threads,
-			comments,
+	private async refreshThreads(): Promise<void> {
+		// 简易去重：避免多个 panel 实例同时 request:threads 导致重复刷新
+		if (this.refreshLock) {
+			return;
+		}
+		this.refreshLock = true;
+		try {
+			const threads = await this.engine.getThreads();
+			const comments: Record<string, Comment[]> = {};
+			for (const t of threads) {
+				comments[t.id] = await this.engine.getComments(t.id);
+			}
+			const numbers = this.computeThreadNumbers(threads);
+
+			console.log('[CoComment] refreshThreads → panel: threads=' + threads.length);
+			this.bridge.sendToPanel({
+				type: 'threads:update',
+				threads,
+				comments,
 			numbers,
 		});
-		// 同步刷新批注层（同一次拿到的 threads，避免重复 getThreads）
-		this.renderer.refreshAll(threads);
-		// 把稳定序号发给批注层用于徽章
-		this.iframes.sendToOverlay({ type: 'update-numbers', numbers });
+			// 同步刷新批注层（同一次拿到的 threads，避免重复 getThreads）
+			this.renderer.refreshAll(threads);
+			// 把稳定序号发给批注层用于徽章
+			this.bridge.sendToOverlay({ type: 'update-numbers', numbers });
+		}
+		finally {
+			this.refreshLock = false;
+		}
 	}
 
 	// ============ 对外暴露给 index.ts 的方法 ============
-	togglePanel(): void {
-		this.iframes.togglePanel();
+	async togglePanel(): Promise<void> {
+		console.log('[CoComment] PanelController.togglePanel, panelOpened=' + this.iframes.isPanelVisible());
+		await this.iframes.togglePanel();
+		console.log('[CoComment] PanelController.togglePanel done, panelVisible=' + this.iframes.isPanelVisible());
 	}
 
-	setPanelVisible(visible: boolean): void {
-		this.iframes.setPanelVisible(visible);
+	async setPanelVisible(visible: boolean): Promise<void> {
+		if (visible) {
+			await this.iframes.showPanel();
+		}
+		else {
+			await this.iframes.hidePanel();
+		}
 	}
 
 	isPanelVisible(): boolean {

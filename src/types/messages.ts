@@ -11,7 +11,7 @@
  */
 
 // ============ 消息来源标识 ============
-export type MessageSource = 'cocomment-parent' | 'cocomment-panel' | 'cocomment-overlay';
+export type MessageSource = 'cocomment-parent' | 'cocomment-panel' | 'cocomment-overlay' | 'cocomment-draw';
 
 // ============ Parent → Panel 的消息 ============
 export type PanelMessage =
@@ -74,6 +74,16 @@ export type OverlayToParentMessage =
 	| { type: 'draw-cancel' }
 	| { type: 'thread-click'; threadId: string };
 
+// ============ Draw Dialog → Parent 的消息 ============
+export type DrawToParentMessage =
+	| { type: 'draw:ready' }
+	| { type: 'draw:cancel' }
+	| { type: 'draw:complete'; image: string; width: number; height: number };
+
+// ============ Parent → Draw Dialog 的消息 ============
+export type DrawMessage =
+	| { type: 'draw:close' };
+
 // ============ 带来源标识的包装 ============
 export interface PanelInboundMessage extends PanelToParentMessage {
 	source: 'cocomment-panel';
@@ -81,4 +91,8 @@ export interface PanelInboundMessage extends PanelToParentMessage {
 
 export interface OverlayInboundMessage extends OverlayToParentMessage {
 	source: 'cocomment-overlay';
+}
+
+export interface DrawInboundMessage extends DrawToParentMessage {
+	source: 'cocomment-draw';
 }

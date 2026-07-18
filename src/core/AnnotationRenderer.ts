@@ -1,6 +1,4 @@
 import type { CommentThread, ThreadAnchor, PageType, BBox } from '../types/comment';
-import type { ViewTransform } from '../utils/coord';
-import { logicBBoxToScreen, screenBBoxToLogic, normalizeBBox } from '../utils/coord';
 import type { OverlayMessage, OverlayToParentMessage, OverlayThreadView } from '../types/messages';
 import type { User } from '../types/user';
 
@@ -9,27 +7,37 @@ export interface AnnotationRendererOptions {
 	pageType: PageType;
 }
 
+const TIMER_ID = 'cocomment-view-poll';
+const POLL_INTERVAL = 250; // ms
+
 /**
  * 批注渲染器 — 只负责：
- *  1. 轮询 EDA 视图状态（zoom/offset）
- *  2. 把 thread 的逻辑坐标 bbox 换算成屏幕坐标
- *  3. 通过 onSendToOverlay 回调把渲染指令交给上层（PanelController）转发
- *  4. 处理 overlay iframe 回传的绘制/点击消息
+ *  1. 用 eda.sys_Timer 定时轮询，把 thread 的数据坐标通过 eda.pcb_Document.convertDataOriginToCanvasOrigin
+ *     转成画布像素坐标，再通过 onSendToOverlay 回调交给上层（PanelController）转发给 overlay iframe
+ *  2. 处理 overlay iframe 回传的绘制/点击消息
  *
- * 不再依赖 ISyncProvider（之前的 sync 字段从未使用，是死依赖）。
- * 不再用 window.dispatchEvent(CustomEvent)，改为显式回调注入。
+ * 重要认知修正（基于 easyeda-api skill 权威文档）:
+ *  - pcb_Document.zoomTo() 不存在！不能用来获取当前视图区域
+ *  - 主进程没有 window、document、requestAnimationFrame → 用 eda.sys_Timer.setIntervalTimer
+ *  - 主进程没有 window.innerWidth → 用 eda.sys_Window.getViewportSize()
+ *  - 坐标换算用 eda.pcb_Document.convertDataOriginToCanvasOrigin / convertCanvasOriginToDataOrigin
+ *
+ * 已知限制（需 PoC 验证）:
+ *  - sys_IFrame.openIFrame 打开的是 Dialog 窗口，不是透明画布覆盖层
+ *    overlay iframe 中的批注框坐标是"画布像素坐标"，但 overlay 是独立浮窗，
+ *    所以批注框不会精确覆盖在画布元素上。要让批注框真正覆盖画布元素，
+ *    需要未来 EDA 提供透明覆盖层 API，或改用画布图元（PCB_Primitive）绘制标记。
  */
 export class AnnotationRenderer {
 	private user: User;
 	private pageType: PageType;
 	private threads: Map<string, CommentThread> = new Map();
-	private view: ViewTransform = { zoom: 1, offsetX: 0, offsetY: 0, canvasWidth: 0, canvasHeight: 0 };
 	private visible = false;
 	private drawing = false;
 	private drawStart: { x: number; y: number } | null = null;
 	private drawResolve: ((anchor: ThreadAnchor | null) => void) | null = null;
 	private onThreadClickCallbacks: Array<(threadId: string) => void> = [];
-	private rafId: number | null = null;
+	private timerRunning = false;
 	private lastViewKey = '';
 
 	/** 由 PanelController 注入：把渲染指令发给 overlay iframe */
@@ -57,54 +65,112 @@ export class AnnotationRenderer {
 	}
 
 	destroy(): void {
-		if (this.rafId) {
-			cancelAnimationFrame(this.rafId);
-			this.rafId = null;
-		}
+		this.stopViewPolling();
 		this.threads.clear();
 	}
 
+	/**
+	 * 用 eda.sys_Timer.setIntervalTimer 设置循环定时器（主进程没有 requestAnimationFrame）。
+	 * 定时把 thread 的数据坐标转成画布像素坐标，推送给 overlay iframe。
+	 */
 	private setupViewPolling(): void {
-		const poll = async () => {
-			try {
-				// 仅 PCB 文档支持（SCH_Document 未在类型定义中暴露）
-				const doc = this.pageType === 'pcb' ? eda.pcb_Document : undefined;
-				if (doc && typeof doc.zoomTo === 'function') {
-					// zoomTo() 不传参，返回当前视图区域 {left,right,top,bottom}
-					const region = await doc.zoomTo();
-					if (region && typeof region === 'object' && 'left' in region) {
-						const width = region.right - region.left;
-						// 用区域宽度 / 画布像素宽度 推算缩放比
-						const zoom = width > 0 ? window.innerWidth / width : 1;
-						// 区域左下角对应屏幕原点偏移（EDA Y 轴向上为正）
-						const newView: ViewTransform = {
-							zoom,
-							offsetX: -region.left * zoom,
-							offsetY: window.innerHeight + region.bottom * zoom,
-							canvasWidth: window.innerWidth,
-							canvasHeight: window.innerHeight,
-						};
-						const viewKey = `${newView.zoom},${newView.offsetX},${newView.offsetY},${newView.canvasWidth},${newView.canvasHeight}`;
-						if (viewKey !== this.lastViewKey) {
-							this.lastViewKey = viewKey;
-							this.view = newView;
-							if (this.visible && this.threads.size > 0) {
-								this.renderAll();
-							}
-						}
-					}
-				}
-			}
-			catch (e) {
-				// 静默失败，使用默认值
-			}
-			this.rafId = requestAnimationFrame(poll);
-		};
-		this.rafId = requestAnimationFrame(poll);
+		if (this.timerRunning) {
+			return;
+		}
+		try {
+			// eda.sys_Timer.setIntervalTimer(id, timeout, callFn, ...args)
+			// 如果遇到 ID 重复的定时器，之前设置的将被清除
+			eda.sys_Timer.setIntervalTimer(TIMER_ID, POLL_INTERVAL, () => {
+				void this.pollOnce();
+			});
+			this.timerRunning = true;
+		}
+		catch (e) {
+			console.warn('[CoComment] sys_Timer.setIntervalTimer failed:', e);
+		}
 	}
 
-	getView(): ViewTransform {
-		return { ...this.view };
+	private stopViewPolling(): void {
+		if (!this.timerRunning) {
+			return;
+		}
+		try {
+			eda.sys_Timer.clearIntervalTimer(TIMER_ID);
+		}
+		catch (e) {
+			// ignore
+		}
+		this.timerRunning = false;
+	}
+
+	/**
+	 * 一次轮询：把所有 thread 的数据坐标转成画布像素坐标，发给 overlay。
+	 * 用 viewKey 去重（坐标没变就不重发）。
+	 */
+	private async pollOnce(): Promise<void> {
+		if (!this.visible || this.threads.size === 0) {
+			return;
+		}
+		try {
+			const positions = await this.computeAllPositions();
+			if (positions.length === 0) {
+				return;
+			}
+			// 用序列化对比避免无变化时的重复推送
+			const viewKey = positions.map(p => `${p.id}:${p.left},${p.top},${p.width},${p.height}`).join('|');
+			if (viewKey !== this.lastViewKey) {
+				this.lastViewKey = viewKey;
+				this.onSendToOverlay({ type: 'update-all', positions });
+			}
+		}
+		catch (e) {
+			// 静默失败，下次重试
+		}
+	}
+
+	/**
+	 * 用 eda.pcb_Document.convertDataOriginToCanvasOrigin 把每个 thread 的 bbox 角点
+	 * 从数据坐标转成画布像素坐标。EDA 的 Y 轴向上为正，画布像素 Y 轴向下为正。
+	 */
+	private async computeAllPositions(): Promise<OverlayThreadView[]> {
+		const doc = this.pageType === 'pcb' ? eda.pcb_Document : undefined;
+		if (!doc || typeof doc.convertDataOriginToCanvasOrigin !== 'function') {
+			return [];
+		}
+
+		const positions: OverlayThreadView[] = [];
+		for (const thread of this.threads.values()) {
+			if (!thread.anchor.bbox) {
+				continue;
+			}
+			try {
+				const bbox = thread.anchor.bbox;
+				// 数据坐标：左下角 (x, y) 和右上角 (x+w, y+h)
+				// convertDataOriginToCanvasOrigin 返回画布像素坐标 {x, y}
+				const bottomLeft = await doc.convertDataOriginToCanvasOrigin(bbox.x, bbox.y);
+				const topRight = await doc.convertDataOriginToCanvasOrigin(bbox.x + bbox.w, bbox.y + bbox.h);
+
+				// 画布像素坐标：左上角取 min，宽高取绝对值
+				const left = Math.min(bottomLeft.x, topRight.x);
+				const top = Math.min(bottomLeft.y, topRight.y);
+				const width = Math.abs(topRight.x - bottomLeft.x);
+				const height = Math.abs(topRight.y - bottomLeft.y);
+
+				positions.push({
+					id: thread.id,
+					status: thread.status,
+					color: this.user.color,
+					left,
+					top,
+					width,
+					height,
+				});
+			}
+			catch (e) {
+				// 单个 thread 转换失败，跳过
+			}
+		}
+		return positions;
 	}
 
 	show(): void {
@@ -123,12 +189,13 @@ export class AnnotationRenderer {
 
 	addThread(thread: CommentThread): void {
 		this.threads.set(thread.id, thread);
-		this.renderThread(thread);
+		// 立即触发一次轮询渲染新 thread，不等下一个定时周期
+		void this.pollOnce();
 	}
 
 	updateThread(thread: CommentThread): void {
 		this.threads.set(thread.id, thread);
-		this.renderThread(thread);
+		void this.pollOnce();
 	}
 
 	removeThread(threadId: string): void {
@@ -146,38 +213,7 @@ export class AnnotationRenderer {
 		for (const t of threads) {
 			this.threads.set(t.id, t);
 		}
-		this.renderAll();
-	}
-
-	private threadToView(thread: CommentThread): OverlayThreadView | null {
-		if (!thread.anchor.bbox) {
-			return null;
-		}
-		const screen = logicBBoxToScreen(thread.anchor.bbox, this.view);
-		return {
-			id: thread.id,
-			status: thread.status,
-			color: this.user.color,
-			...screen,
-		};
-	}
-
-	private renderThread(thread: CommentThread): void {
-		const view = this.threadToView(thread);
-		if (view) {
-			this.onSendToOverlay({ type: 'update-thread', thread: view });
-		}
-	}
-
-	private renderAll(): void {
-		const positions: OverlayThreadView[] = [];
-		for (const thread of this.threads.values()) {
-			const view = this.threadToView(thread);
-			if (view) {
-				positions.push(view);
-			}
-		}
-		this.onSendToOverlay({ type: 'update-all', positions });
+		void this.pollOnce();
 	}
 
 	startDrawing(type: 'box' | 'arrow' = 'box'): Promise<ThreadAnchor | null> {
@@ -200,7 +236,9 @@ export class AnnotationRenderer {
 	}
 
 	/**
-	 * 处理 overlay iframe 回传的消息。由 PanelController 在 message 监听里调用。
+	 * 处理 overlay iframe 回传的消息。由 PanelController 在 onOverlayMessage 监听里调用。
+	 * draw-end 时把 overlay 屏幕坐标（overlay iframe 内的像素坐标）通过
+	 * eda.pcb_Document.convertCanvasOriginToDataOrigin 转成数据坐标作为 anchor。
 	 */
 	handleIframeMessage(msg: OverlayToParentMessage): void {
 		if (!msg || typeof msg !== 'object') {
@@ -226,19 +264,15 @@ export class AnnotationRenderer {
 						h: Math.abs(end.y - start.y),
 					};
 					if (bbox.w > 5 && bbox.h > 5) {
-						const logicBBox = screenBBoxToLogic(bbox.x, bbox.y, bbox.w, bbox.h, this.view);
-						const anchor: ThreadAnchor = {
-							type: 'box',
-							bbox: normalizeBBox(logicBBox),
-						};
-						this.drawResolve(anchor);
+						// 把 overlay 屏幕坐标转成数据坐标作为 anchor
+						void this.anchorFromScreenBBox(bbox);
 					}
 					else {
 						this.drawResolve(null);
+						this.drawResolve = null;
+						this.drawStart = null;
+						this.drawing = false;
 					}
-					this.drawResolve = null;
-					this.drawStart = null;
-					this.drawing = false;
 				}
 				break;
 			}
@@ -252,6 +286,49 @@ export class AnnotationRenderer {
 				}
 				break;
 			}
+		}
+	}
+
+	/**
+	 * 把 overlay 屏幕坐标的 bbox 转成数据坐标的 anchor。
+	 * 用 eda.pcb_Document.convertCanvasOriginToDataOrigin。
+	 * 注意：overlay 是独立 Dialog 窗口，其坐标不是画布坐标，这里只是尽力转换。
+	 */
+	private async anchorFromScreenBBox(bbox: BBox): Promise<void> {
+		if (!this.drawResolve) {
+			return;
+		}
+		const doc = this.pageType === 'pcb' ? eda.pcb_Document : undefined;
+		if (!doc || typeof doc.convertCanvasOriginToDataOrigin !== 'function') {
+			// 无转换 API，直接用屏幕坐标作为 anchor（不可导航）
+			const anchor: ThreadAnchor = { type: 'box', bbox };
+			this.drawResolve(anchor);
+			this.drawResolve = null;
+			this.drawStart = null;
+			this.drawing = false;
+			return;
+		}
+		try {
+			const bl = await doc.convertCanvasOriginToDataOrigin(bbox.x, bbox.y + bbox.h);
+			const tr = await doc.convertCanvasOriginToDataOrigin(bbox.x + bbox.w, bbox.y);
+			const logicBBox: BBox = {
+				x: Math.min(bl.x, tr.x),
+				y: Math.min(bl.y, tr.y),
+				w: Math.abs(tr.x - bl.x),
+				h: Math.abs(tr.y - bl.y),
+			};
+			const anchor: ThreadAnchor = { type: 'box', bbox: logicBBox };
+			this.drawResolve(anchor);
+		}
+		catch (e) {
+			// 转换失败，用屏幕坐标兜底
+			const anchor: ThreadAnchor = { type: 'box', bbox };
+			this.drawResolve(anchor);
+		}
+		finally {
+			this.drawResolve = null;
+			this.drawStart = null;
+			this.drawing = false;
 		}
 	}
 

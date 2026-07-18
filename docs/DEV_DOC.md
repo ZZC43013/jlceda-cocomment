@@ -1,6 +1,6 @@
 # CoComment — 嘉立创EDA团队协作评论扩展 开发文档
 
-> 版本：v0.1.0 (MVP 规划中)
+> 版本：v0.2.0
 > 最后更新：2026-07-17
 > 项目路径：`pro-api-sdk/`（基于嘉立创EDA pro-api-sdk 脚手架开发）
 
@@ -28,18 +28,19 @@
 ```
 ┌─────────────┐    ┌──────────────┐    ┌──────────────────┐
 │  阶段 1      │ →  │  阶段 2      │ →  │  阶段 3          │
-│  本地评论    │    │  云同步       │    │  实时多人协同     │
-│  (MVP)      │    │  (准协同)    │    │  (WebSocket)    │
+│  本地评论    │    │  准协同       │    │  实时多人协同     │
+│  (MVP)      │    │  (方案B)     │    │  (WebSocket)    │
 └─────────────┘    └──────────────┘    └──────────────────┘
+  ✅ 已完成          ✅ 已完成            ⏳ 等待嘉立创开放API
 ```
 
-| 阶段 | 名称 | 核心能力 | 预计工作量 | 状态 |
-|---|---|---|---|---|
-| 1 | 本地评论 MVP | 批注框 + 评论 CRUD + 本地存储 + 跳转定位 + JSON 导入导出 | 约 3-5 天 | 🚧 进行中 |
-| 2 | 云同步 | 后端 REST API + 评论上云 + 手动/自动同步 + 用户系统 | 约 3-5 天 | ⏳ 规划中 |
-| 3 | 实时协同 | WebSocket 推送 + 多人光标 + 实时评论 + 操作冲突处理 | 约 5-7 天 | ⏳ 规划中 |
+| 阶段 | 名称 | 核心能力 | 状态 |
+|---|---|---|---|
+| 1 | 本地评论 MVP | 批注框 + 评论 CRUD + 本地存储 + 跳转定位 + JSON 导入导出 | ✅ 已完成 |
+| 2 | 准协同（方案B） | 评论数据序列化进工程文档源码，靠 EDA 工程同步机制传播 | ✅ 已完成 |
+| 3 | 实时协同 | WebSocket 推送 + 多人光标 + 实时评论 + 操作冲突处理 | ⏳ 等待嘉立创开放API |
 
-### 阶段 1 — 本地评论 MVP（当前目标）
+### 阶段 1 — 本地评论 MVP（已完成）
 - ✅ 原理图/PCB 批注框绘制（透明 iframe 覆盖层）
 - ✅ 评论线程管理（增删改查、未解决/已解决状态）
 - ✅ 本地数据存储（sys_Storage）
@@ -48,18 +49,50 @@
 - ✅ 右侧评论列表面板
 - ✅ 批注工具栏
 
-### 阶段 2 — 云同步（后续）
-- 后端 Node.js 服务 + SQLite/PostgreSQL
-- REST API：评论的增删改查同步
-- 用户系统（昵称 + UUID）
-- 手动/定时同步（拉模式）
+### 阶段 2 — 准协同 / 方案B（已完成）
 
-### 阶段 3 — 实时协同（最终目标）
-- WebSocket 双向通信
-- 房间机制（工程 = 房间）
-- 多人光标可见
-- 实时评论推送
-- 操作日志 + 冲突解决
+**核心思路**：把评论数据序列化为标记块（`%%COCOMMENT_V1:<base64>%%`）追加到当前 sch/pcb 文档源码末尾，靠 EDA 自身的工程同步机制传播给团队成员。团队成员打开同一工程后调"从工程读取评论"即可恢复。
+
+**为什么不走自建后端**：嘉立创EDA专业版本身支持团队工程协作（`EDMT_ProjectCollaborationMode`：FREE/STRICT 模式），工程文档会自动在团队成员间同步。把评论数据"搭便车"注入文档源码，无需自建后端即可实现跨设备、跨用户的评论传播。
+
+**实现**：`src/sync/ProjectSync.ts`，基于两个 BETA API：
+- `eda.sys_FileManager.getDocumentSource()` — 读取当前文档源码
+- `eda.sys_FileManager.setDocumentSource(source)` — 写回修改后的源码
+
+**安全设计**：
+- 标记块只追加在源码末尾，不修改原始设计数据
+- base64 内容仅含 `[A-Za-z0-9+/=]`，不破坏源码字符串
+- syncToProject 前自动备份原始源码到 `sys_Storage`
+- 写入前弹窗确认，异常时可用"恢复工程源码"菜单还原
+
+**菜单项**（sch + pcb 各一组）：
+- 同步评论到工程（`syncToProject`）
+- 从工程读取评论（`syncFromProject`）
+- 恢复工程源码（`restoreProjectBackup`）
+
+**已知风险**（需 PoC 验证）：
+- `setDocumentSource` 是 BETA API，行为可能不稳定
+- 若 EDA 文档源码是严格 JSON，末尾追加非 JSON 内容可能导致解析失败
+- 多人同时 syncToProject 会产生覆盖冲突（无锁机制）
+
+### 阶段 3 — 实时协同（⏳ 等待嘉立创开放API）
+
+**当前阻塞**：嘉立创EDA专业版暂未暴露以下实时协作 API，本阶段无法推进：
+
+| 缺失能力 | 说明 | 当前可读但不可写的 API |
+|---|---|---|
+| 协作者列表 / 在线状态 | 无法获取当前工程有哪些团队成员在线 | `eda.sys_Environment.getUserInfo()` 仅返回当前用户 |
+| 实时光标 / 视图同步 | 无法看到他人的鼠标位置和视图区域 | 无 |
+| 实时评论推送 | 评论增删无法实时广播给在线协作者 | `eda.sys_MessageBus` 仅限本机跨 context，不跨用户 |
+| 冲突解决 / 操作日志 | 多人同时编辑同一 thread 无法自动合并 | 无 |
+| 共享 KV 存储 | 无工程级别的共享键值存储（仅 `sys_Storage` 按用户隔离） | `eda.sys_Storage` 是用户私有 |
+| 邀请 / 移除协作者 | 无法在扩展内管理工程成员 | 无 |
+
+**可用的外部通信能力**（可用于自建协作通道，但需要自建服务器）：
+- `eda.sys_WebSocket` — 原生 WebSocket 客户端
+- `eda.sys_ClientUrl` — 获取客户端 URL 信息
+
+**等待清单**：待嘉立创开放上述 API 后，本扩展可演进为真正的实时多人协同评论工具。在此之前，团队协作通过阶段2的方案B（评论随工程文档同步）实现准协同。
 
 ---
 
@@ -89,23 +122,34 @@
 │  └─────────────────────────────────────────────┼─────────┘   │
 │                                                │             │
 │         消息协议: types/messages.ts            │             │
-│         (PanelMessage/OverlayMessage)          │             │
+│         (PanelMessage/OverlayMessage/DrawMessage)│           │
 │                                                │             │
 │         iframe 创建: IframeManager             │             │
-│         (探测 sys_PanelControl/sys_IFrame      │             │
-│          → 降级原生 HTMLIFrameElement)          │             │
+│         (基于 eda.sys_IFrame.openIFrame，       │             │
+│          用 id 管理 panel/overlay/draw 窗口)    │             │
 │                                                │             │
-│         存储: window.localStorage              │             │
-│         (sys_Storage 不存在，改用浏览器原生)     │             │
+│         跨 context 通信: MessageBridge          │             │
+│         (基于 eda.sys_MessageBus.publish/       │             │
+│          subscribe，构造时清理旧订阅防泄漏)      │             │
+│                                                │             │
+│         存储: eda.sys_Storage                   │             │
+│         (getExtensionUserConfig/                │             │
+│          setExtensionUserConfig，按用户隔离)    │             │
+│                                                │             │
+│         方案B 同步: ProjectSync                 │             │
+│         (eda.sys_FileManager.getDocumentSource/ │             │
+│          setDocumentSource BETA API)            │             │
 └─────────────────────────────────────────────────────────────┘
 ```
 
 **职责分层（解耦后）**：
-- `index.ts` — 入口，装配 IframeManager + AnnotationRenderer + PanelController
-- `IframeManager` — iframe 创建/显隐/销毁/postMessage（从 PanelController 抽离）
+- `index.ts` — 入口，装配 IframeManager + MessageBridge + AnnotationRenderer + PanelController
+- `IframeManager` — 基于 `sys_IFrame` 的窗口管理（panel/overlay/draw，用 id 管理）
+- `MessageBridge` — 基于 `sys_MessageBus` 的跨 context 通信桥（构造时清理旧订阅防泄漏）
 - `AnnotationRenderer` — 视图轮询 + 坐标换算 + 通过回调发渲染指令（不依赖 ISyncProvider，不发 CustomEvent）
-- `PanelController` — 业务编排 + 消息路由（瘦身，不再管 iframe 实现细节）
-- `types/messages.ts` — 统一消息协议类型定义（PanelMessage / OverlayMessage / Inbound）
+- `PanelController` — 业务编排 + 消息路由 + 方案B同步入口（注入 ProjectSync）
+- `ProjectSync` — 方案B：评论数据与工程文档源码双向同步（标记块注入）
+- `types/messages.ts` — 统一消息协议类型定义（PanelMessage / OverlayMessage / DrawMessage / Inbound）
 
 ### 3.2 完整架构（阶段3）
 
@@ -121,43 +165,56 @@ pro-api-sdk/
 │   └── DEV_DOC.md               # 本文档
 │
 ├── src/
-│   ├── index.ts                 # 入口：注册菜单、初始化
-│   ├── bootstrap.ts             # 启动引导
+│   ├── index.ts                 # 入口：注册菜单、装配各模块
 │   │
 │   ├── core/                    # 业务核心层
 │   │   ├── CommentEngine.ts     # 评论引擎（总控入口）
 │   │   ├── ThreadManager.ts     # 评论线程管理
-│   │   ├── AnnotationRenderer.ts # 批注渲染器
+│   │   ├── CommentManager.ts    # 评论管理
+│   │   ├── AnnotationRenderer.ts # 批注渲染器（视图轮询 + 坐标换算）
 │   │   └── Navigator.ts         # 定位导航
 │   │
 │   ├── ui/                      # UI 控制层
-│   │   ├── PanelController.ts   # 业务编排 + 消息路由（已瘦身）
-│   │   ├── IframeManager.ts     # iframe 创建/显隐/消息（从 PanelController 抽离）
-│   │   └── ToolbarManager.ts    # 工具栏管理（规划中）
+│   │   ├── PanelController.ts   # 业务编排 + 消息路由 + 方案B同步入口
+│   │   ├── IframeManager.ts     # sys_IFrame 窗口管理（panel/overlay/draw）
+│   │   └── MessageBridge.ts     # sys_MessageBus 跨 context 通信桥
 │   │
-│   ├── iframe/                  # iframe 承载的复杂 UI
-│   │   ├── panel.html           # 评论面板（主 UI）
-│   │   ├── panel.css
-│   │   └── panel.ts             # 面板交互逻辑（规划中）
+│   ├── iframe/                  # iframe 承载的 UI
+│   │   ├── panel.html           # 评论面板（右侧列表）
+│   │   ├── annotation.html      # 批注渲染层
+│   │   └── draw.html            # 绘制 Dialog（手绘/粘贴/上传图片）
 │   │
 │   ├── sync/                    # 存储同步层
 │   │   ├── SyncProvider.ts      # 同步提供者接口
-│   │   └── LocalSync.ts         # 本地存储实现（阶段1）
+│   │   ├── LocalSync.ts         # 本地存储实现（阶段1，基于 sys_Storage）
+│   │   └── ProjectSync.ts       # 方案B：工程文档源码双向同步（基于 sys_FileManager BETA API）
 │   │
 │   ├── types/                   # 类型定义
-│   │   ├── comment.ts
-│   │   ├── user.ts
-│   │   ├── sync.ts
-│   │   └── messages.ts          # 跨 iframe 消息协议（解耦后新增）
+│   │   ├── comment.ts           # CommentThread / Comment / BBox
+│   │   ├── user.ts              # User
+│   │   ├── sync.ts              # SyncOp / ProjectData / LocalData
+│   │   └── messages.ts          # 跨 iframe 消息协议
 │   │
 │   └── utils/                   # 工具函数
-│       ├── coord.ts             # 坐标换算
-│       ├── id.ts                # ID 生成
-│       └── i18n.ts              # 多语言
+│       ├── coord.ts             # 坐标换算（逻辑坐标 ↔ 屏幕坐标）
+│       ├── id.ts                # UUID 生成
+│       └── i18n.ts              # 多语言（zh-Hans）
+│
+├── config/                      # 构建配置
+│   ├── esbuild.common.ts        # esbuild 公共配置
+│   ├── esbuild.dev.ts           # 开发模式（watch）
+│   └── esbuild.prod.ts          # 生产编译（含 HTML 语法检查 + iframe 复制）
+│
+├── build/
+│   └── packaged.ts              # .eext 打包脚本
 │
 ├── extension.json               # 扩展清单
 ├── package.json
-└── tsconfig.json
+├── tsconfig.json
+├── .edaignore                   # .eext 打包过滤规则
+├── .gitignore
+├── CHANGELOG.md                 # 更新日志
+└── README.md                    # 项目说明
 ```
 
 ---
@@ -359,61 +416,70 @@ interface ISyncProvider {
 
 ## 七、批注渲染技术方案
 
-### 7.1 方案：透明 iframe 覆盖层
+### 7.1 方案：draw Dialog + 图像锚点
 
-使用 `eda.sys_IFrame` 创建一个全屏透明的 iframe，作为批注绘制层。
+**当前实现**（已放弃早期"透明 iframe 覆盖层"方案）：
+- `sys_IFrame.openIFrame` 打开的是模态 Dialog 窗口（带标题栏的独立浮窗），不是透明覆盖层，无法在画布上直接绘制
+- 改为打开独立的**绘制 Dialog**（`draw.html`），用户可：
+  1. 手绘（画笔、矩形、箭头、文字标注）
+  2. Ctrl+V 粘贴截图（配合系统截图工具 Win+Shift+S）
+  3. 上传本地图片
+- 确认后画布内容保存为 base64 PNG 图像，作为 thread 的 `anchor.image`
 
-### 7.2 坐标系统
+### 7.2 坐标系统（批注渲染）
 
 ```
 画布逻辑坐标 (mil/mm)
     │
-    │  zoom, offset
+    │  eda.pcb_Document.convertDataOriginToCanvasOrigin
     ▼
-屏幕像素坐标 (px)
+画布像素坐标 (px)
     │
-    │  CSS position
+    │  logicBBoxToScreen (utils/coord.ts)
     ▼
-iframe 内 DOM 元素位置
+annotation iframe 内 DOM 元素位置
 ```
 
 ### 7.3 坐标换算工具（utils/coord.ts）
 
+- `logicBBoxToScreen(bbox, view)` — 逻辑矩形 → 屏幕矩形（用于批注框定位）
 - `logicToScreen(x, y, view)` — 逻辑坐标 → 屏幕像素
 - `screenToLogic(x, y, view)` — 屏幕像素 → 逻辑坐标
-- `logicBBoxToScreen(bbox, view)` — 逻辑矩形 → 屏幕矩形
 
 ### 7.4 视图同步
 
-- 监听视图变化事件（或轮询）获取当前 zoom / offset
-- 视图变化时，批量更新所有批注框的 CSS transform
-- 使用 `requestAnimationFrame` 合并更新，保证 60fps
+- 用 `eda.sys_Timer.setIntervalTimer` 轮询视图状态（250ms 间隔）
+- 检测 viewKey（zoom + offset + 视口尺寸）变化时才触发 `renderAll()`
+- 主进程无 `requestAnimationFrame`，用 `sys_Timer` 替代
 
-### 7.5 绘制交互流程
+### 7.5 绘制交互流程（当前实现）
 
 ```
-点击工具栏「添加批注」
+点击菜单"添加批注" / 面板 + 按钮
     ↓
-进入绘制模式（鼠标变十字）
+PanelController.startDrawing()
     ↓
-mousedown → 记录起点（屏幕 → 逻辑）
+IframeManager.openDraw() 打开 draw Dialog
     ↓
-mousemove → 实时更新预览框（iframe 层内完成）
+用户在 Dialog 内手绘/粘贴/上传图片
     ↓
-mouseup → 确认批注框
+点"确认" → draw:complete 消息（含 base64 图像）
     ↓
-弹出评论输入（面板新增输入框）
+PanelController 收到图像 → 创建 thread（anchor.image = base64）
     ↓
-提交 → 创建 Thread + Comment
+AnnotationRenderer.addThread(thread) 渲染到画布
     ↓
-渲染批注标记
+通知面板 thread:created，focus 输入框
+    ↓
+用户输入评论内容，回车提交
 ```
 
-### 7.6 鼠标穿透
+### 7.6 批注渲染层（annotation.html）
 
-- 默认状态：iframe `pointer-events: none`（不拦截画布操作）
-- 绘制模式：iframe `pointer-events: auto`（捕获绘制操作）
-- 批注框标记：始终 `pointer-events: auto`（可点击）
+- 通过 `sys_IFrame.openIFrame` 打开的独立浮窗
+- 接收主进程通过 `sys_MessageBus` 发来的渲染指令（`addThread`/`updateThread`/`removeThread`/`refreshAll`）
+- 根据 thread 的 `anchor.image`（base64 PNG）在对应位置渲染图像 + 序号徽章
+- 视图变化时由主进程的 `AnnotationRenderer` 推算新位置并下发更新
 
 ---
 
@@ -449,73 +515,109 @@ mouseup → 确认批注框
 
 ### 8.3 工具栏入口
 
-- 顶部菜单：`CoComment → 显示评论面板 / 添加批注 / 导入 / 导出 / 设置`
+- 顶部菜单（sch/pcb）：`CoComment → 显示评论面板 / 添加批注 / 显示隐藏批注 / 导出评论 / 导入评论 / 同步评论到工程 / 从工程读取评论 / 恢复工程源码 / 关于 CoComment`
+- 顶部菜单（home）：`CoComment → 关于 CoComment`
 - 右侧面板常驻开关
 
 ---
 
 ## 九、关键 API 使用清单
 
-> 以下 API 名称均来自 `@jlceda/pro-api-types/index.d.ts` 真实类型定义文件，
-> 不再使用任何猜测的 API 名。`eda` 是 EDA 宿主注入的全局对象。
+> 以下 API 名称均来自 easyeda-api skill 权威 API 参考文档
+> (`c:\Users\ZZC18\.trae-cn\skills\easyeda-api-skill\references\classes\`)，
+> 该文档比 npm 包 `@jlceda/pro-api-types/index.d.ts` 更权威、更完整
+> （npm 类型定义严重滞后，仅收录 2 个 SYS_ 类，实际运行时有 27 个 SYS_ 类）。
+> `eda` 是 EDA 宿主注入的全局对象，扩展主进程和 sys_IFrame 内均可直接访问。
 
-### 9.1 真实存在的 API（类型定义文件收录）
+### 9.1 本项目使用的真实 EDA API（经 easyeda-api skill 确认存在）
 
-| EDA API | 类型定义位置 | 用途 | 本项目模块 |
+| EDA API | 签名 | 用途 | 本项目模块 |
 |---|---|---|---|
-| `eda.pcb_Document.zoomTo(x?, y?, scaleRatio?, tabId?)` | L4358 / L1123 | 视图区域查询与缩放定位 | AnnotationRenderer（视图轮询）、Navigator（跳转） |
-| `eda.pcb_Document.navigateToCoordinates(x, y)` | L4502 | 坐标导航 | Navigator 备选 |
-| `eda.pcb_Document.getCanvasOrigin()` | L4464 | 获取画布原点偏移 | coord 换算（PoC 验证） |
-| `eda.pcb_Document.convertCanvasOriginToDataOrigin(x, y)` | L4432 | 画布原点→数据原点 | coord 换算 |
-| `eda.pcb_Document.convertDataOriginToCanvasOrigin(x, y)` | L4445 | 数据原点→画布原点 | coord 换算 |
-| `eda.pcb_Event.addMouseEventListener(id, eventType, callFn, onlyOnce?)` | L5156 / L5174 | 鼠标事件监听（绘制用） | AnnotationRenderer（绘制模式，PoC 替换 iframe 内捕获） |
-| `eda.pcb_Event.addPrimitiveEventListener(id, eventType, callFn, onlyOnce?)` | L5156 | 图元事件监听 | SelectionLinker（规划中） |
-| `eda.sys_FileManager.getProjectFile(...)` | L5381 / L5396 | 获取工程文件 | 导入导出（备选方案） |
-| `eda.sys_FileManager.getDocumentFile(...)` | L5410 | 获取文档文件 | 导入导出（备选方案） |
-| `eda.sys_Unit` | L1725 | 单位枚举（MIL/INCH/MM/CM/M） | coord 换算单位判断 |
-| `eda.dmt_EditorControl` | L980 | 文档树编辑控制（打开/切换文档） | Navigator（页面切换，PoC 验证） |
-| `eda.dmt_Event` | L1211 | 文档树事件 | 监听页面切换以重载批注 |
-| `eda.pcb_Drc` | L4677 | 自定义 DRC 规则 | 规划中（评论→DRC 标记联动） |
-| `eda.pcb_ManufactureData.getBomFile(...)` | L5653 / L5911 | BOM 文件导出 | 规划中（BOM 联动） |
+| `eda.sys_IFrame.openIFrame` | `openIFrame(htmlFileName, width?, height?, id?, props?): Promise<boolean>` | 打开内联框架窗口（Dialog） | IframeManager（panel + overlay） |
+| `eda.sys_IFrame.showIFrame` | `showIFrame(id?): Promise<boolean>` | 显示 iframe 窗口 | IframeManager |
+| `eda.sys_IFrame.hideIFrame` | `hideIFrame(id?): Promise<boolean>` | 隐藏 iframe 窗口 | IframeManager |
+| `eda.sys_IFrame.closeIFrame` | `closeIFrame(id?): Promise<boolean>` | 关闭 iframe 窗口 | IframeManager |
+| `eda.sys_MessageBus.publish` | `publish(topic, message): void` | 跨 context 广播消息 | MessageBridge（主进程→iframe / iframe→主进程） |
+| `eda.sys_MessageBus.subscribe` | `subscribe(topic, callbackFn): Task` | 订阅 topic | MessageBridge（带 `task.remove()` 取消订阅） |
+| `eda.sys_Storage.getExtensionUserConfig` | `getExtensionUserConfig(key): any` (同步) | 读取扩展用户配置 | LocalSync（评论数据持久化） |
+| `eda.sys_Storage.setExtensionUserConfig` | `setExtensionUserConfig(key, value): Promise<void>` (异步) | 写入扩展用户配置 | LocalSync |
+| `eda.sys_Dialog.showInformationMessage` | `showInformationMessage(message, title?): Promise<void>` | 信息提示对话框 | index.ts `about()` |
+| `eda.sys_Dialog.showConfirmationMessage` | `showConfirmationMessage(content, title?, mainButtonTitle?, buttonTitle?, callbackFn): void` | 确认对话框（回调返回是否点主按钮） | PanelController `confirm()`（方案B写入前确认） |
+| `eda.sys_FileManager.getDocumentSource` | `getDocumentSource(): Promise<string \| undefined>` (BETA) | 获取当前文档源码 | ProjectSync `syncFromProject()` |
+| `eda.sys_FileManager.setDocumentSource` | `setDocumentSource(source: string): Promise<boolean>` (BETA) | 修改当前文档源码 | ProjectSync `syncToProject()` |
+| `eda.sys_FileSystem.saveFile` | `saveFile(fileData: File \| Blob, fileName?: string): Promise<void>` | 保存文件（触发浏览器下载） | PanelController `exportComments()` |
+| `eda.sys_FileSystem.openReadFileDialog` | `openReadFileDialog(filenameExtensions?, multiFiles?): Promise<Array<File> \| undefined>` | 打开文件读取对话框 | PanelController `importComments()` |
+| `eda.sys_Timer.setIntervalTimer` | `setIntervalTimer(id: string, timeout: number, callFn, ...args): boolean` | 循环定时器（主进程无 setInterval） | AnnotationRenderer 视图轮询 |
+| `eda.sys_Timer.clearIntervalTimer` | `clearIntervalTimer(id: string): boolean` | 清除循环定时器 | AnnotationRenderer |
+| `eda.sys_Window.getViewportSize` | `getViewportSize(): { width: number; height: number }` | 获取视口大小（主进程无 window.innerWidth） | AnnotationRenderer（需 EDA v3.2.162+） |
+| `eda.pcb_Document.convertDataOriginToCanvasOrigin` | `convertDataOriginToCanvasOrigin(x, y): Promise<{x,y}>` | 数据坐标→画布像素坐标 | AnnotationRenderer 渲染批注框 |
+| `eda.pcb_Document.convertCanvasOriginToDataOrigin` | `convertCanvasOriginToDataOrigin(x, y): Promise<{x,y}>` | 画布像素坐标→数据坐标 | AnnotationRenderer 绘制→anchor |
+| `eda.pcb_Document.navigateToCoordinates` | `navigateToCoordinates(x, y): Promise<boolean>` | 定位到数据坐标 | Navigator `jumpToThread()` |
+| `eda.sys_Timer` / `eda.sys_Window` 等 27 个 SYS_ 类 | 见 skill references/classes/SYS_*.md | 系统级能力 | 各模块 |
 
-### 9.2 在示例注释中真实出现但类型未收录的 API
-
-| EDA API | 出现位置 | 用途 | 备注 |
-|---|---|---|---|
-| `eda.sys_FileSystem.saveFile(file, fileName?)` | L5683/L5735/L5800 等 21 处 | 保存文件到本地 | 类型未收录但官方示例频繁使用 |
-| `eda.sys_FileSystem.openReadFileDialog(ext)` | L5848 | 打开文件读取对话框 | 类型未收录但官方示例使用 |
-
-### 9.3 本项目使用的非 EDA API（浏览器原生）
-
-| API | 用途 | 模块 |
-|---|---|---|
-| `window.localStorage` | 本地数据持久化（评论数据） | LocalSync |
-| `window.requestAnimationFrame` | 视图轮询（60fps 合并渲染） | AnnotationRenderer |
-| `document.createElement('iframe')` | iframe 兜底方案 | PanelController（当 `sys_IFrame` 不存在时） |
-| `window.postMessage` / `MessageEvent` | 跨 iframe 通信 | PanelController / Renderer |
-| `Blob` + `URL.createObjectURL` | JSON 文件导出 | index.ts / PanelController |
-| `crypto.randomUUID()` | UUID 生成 | utils/id.ts |
-
-### 9.4 菜单注册（声明式，无需调 API）
+### 9.2 菜单注册（声明式，无需调 API）
 
 菜单注册通过 `extension.json` 的 `headerMenus` 字段静态配置，
 `registerFn` 指向入口文件 `src/index.ts` 导出的函数名，由 EDA 宿主在加载时反射调用。
-本项目不需要在代码里调 `eda.sys_HeaderMenu.create()` 之类的 API（该 API 也不存在于类型定义中）。
+本项目不需要在代码里调 `eda.sys_HeaderMenu.create()` 之类的 API。
 
-### 9.5 ⚠️ 不存在的 API（早期文档中误用，已剔除）
+### 9.3 本项目使用的非 EDA API（浏览器原生，仅限 iframe 内）
 
-以下 API 名是早期开发文档中猜测的，在 `index.d.ts` 中均无定义，已全部移除：
+> ⚠️ **主进程禁止**：`window`、`document`、`localStorage`、`requestAnimationFrame`、
+> `document.createElement`、`alert`、`confirm` 等浏览器 API 在**扩展主进程中不可用**，
+> 必须用 `eda.sys_*` 替代。下表中的 API 仅在 `sys_IFrame` 打开的 iframe 内可用。
 
-- ❌ `eda.sys_Storage.getItem/setItem` → 改用 `window.localStorage`
-- ❌ `eda.sys_IFrame.create` / `eda.sys_Iframe.create` → 改为 `(eda as any)` 运行时探测 + 浏览器 iframe 兜底
-- ❌ `eda.sys_PanelControl.create` → 同上，运行时探测
-- ❌ `eda.sys_Dialog.showInformationMessage` → 运行时探测，无则 `console.log`
-- ❌ `eda.sys_I18n.text` / `eda.sys_I18n.getLocale` → 改用自带 i18n 字典，默认 zh-Hans
-- ❌ `eda.sys_HeaderMenu` → 不需要，用 `extension.json` 静态注册
-- ❌ `eda.sys_Window` → 不存在，改用浏览器原生 DOM
-- ❌ `eda.sys_ToastMessage` → 不存在，用 `console.warn` 替代
-- ❌ `eda.pcb_document.getViewState()` → 小写 `pcb_document` 错误，正确为 `eda.pcb_Document`；且无 `getViewState` 方法，改用 `zoomTo()` 返回值推算视图
-- ❌ `eda.sch_document` / `eda.sch_event` → 原理图相关 API 在类型定义中未暴露，原理图批注暂不支持（阶段 2 PoC 验证）
+| API | 用途 | 使用位置 | 是否主进程 |
+|---|---|---|---|
+| `document.createElement` | 创建 DOM 元素 | panel.html / annotation.html（iframe 内） | ❌ 仅 iframe |
+| `document.getElementById` | 获取 DOM 元素 | panel.html / annotation.html（iframe 内） | ❌ 仅 iframe |
+| `document.addEventListener` | 事件监听（鼠标绘制） | annotation.html（iframe 内） | ❌ 仅 iframe |
+| `setTimeout` / `clearTimeout` | 短延时定时器（防抖） | PanelController（主进程，JS 全局函数，非 window.setTimeout） | ✅ 主进程可用 |
+| `Blob` | 文件导出数据封装 | PanelController `exportComments()` | ✅ 主进程可用 |
+| `console.log/warn` | 日志 | 各模块 | ✅ 主进程可用 |
+| `JSON.parse/stringify` | 数据序列化 | 各模块 | ✅ 主进程可用 |
+| `Map` / `Set` / `Promise` | JS 标准内置对象 | 各模块 | ✅ 主进程可用 |
+
+### 9.4 ⚠️ 已修正的架构错误（早期版本误用，已全部移除）
+
+完整重构中修正的关键认知错误：
+
+| 错误认知 | 真实情况 | 修正方案 |
+|---|---|---|
+| ❌ `eda.pcb_Document.zoomTo()` 存在，可获取视图区域 | `zoomTo` 不存在！PCB_Document 无此方法 | 用 `convertDataOriginToCanvasOrigin` 逐 thread 转坐标 |
+| ❌ `window.localStorage` 可在主进程用 | 主进程禁止 `window`、`localStorage` | 改用 `eda.sys_Storage.getExtensionUserConfig/setExtensionUserConfig` |
+| ❌ `window.requestAnimationFrame` 可在主进程用 | 主进程禁止 `window`、`requestAnimationFrame` | 改用 `eda.sys_Timer.setIntervalTimer/clearIntervalTimer` |
+| ❌ `window.innerWidth/innerHeight` 可在主进程用 | 主进程禁止 `window` | 改用 `eda.sys_Window.getViewportSize()` |
+| ❌ `sys_IFrame.openIFrame` 返回 iframe 句柄，可用 postMessage | 返回 `Promise<boolean>`，用 id 管理窗口，无句柄 | 跨 context 通信改用 `eda.sys_MessageBus` |
+| ❌ `sys_IFrame` 可创建透明画布覆盖层 | `openIFrame` 打开的是 Dialog 窗口（带标题栏的独立浮窗） | overlay iframe 改为独立浮窗，批注框坐标需 PoC 验证 |
+| ❌ `window.parent.postMessage` 可跨 iframe 通信 | 主进程禁止 `window`，且 sys_IFrame 不返回句柄 | 全部改用 `eda.sys_MessageBus.publish/subscribe` |
+| ❌ `document.createElement('a')` 可导出文件 | 主进程禁止 `document` | 改用 `eda.sys_FileSystem.saveFile(Blob, fileName)` |
+| ❌ `document.createElement('input')` 可导入文件 | 主进程禁止 `document` | 改用 `eda.sys_FileSystem.openReadFileDialog()` |
+| ❌ `window.setTimeout` 可在主进程用 | `window` 在主进程不可用 | 改用全局 `setTimeout`（JS 运行时内置，不依赖 window） |
+| ❌ `(eda as any).sys_Dialog` 需要类型断言绕过 | sys_Dialog 是真实 API，skill 文档收录 | 直接 `eda.sys_Dialog.showInformationMessage()` |
+| ❌ `eda.sys_Storage.getItem/setItem` 是正确方法名 | 真实方法名是 `getExtensionUserConfig/setExtensionUserConfig` | 已修正 |
+| ❌ npm `@jlceda/pro-api-types` 是权威类型定义 | 该包严重滞后，仅收录 2 个 SYS_ 类 | 以 easyeda-api skill 文档为准（27 个 SYS_ 类） |
+
+### 9.5 已知限制（需 PoC 验证）
+
+以下问题已用真实 API 修正，但需在实际 EDA 环境中验证：
+
+1. **annotation iframe 定位精度**：`sys_IFrame.openIFrame` 打开的是 Dialog 窗口（独立浮窗），
+   不是透明画布覆盖层。annotation iframe 中的批注图像坐标是"画布像素坐标"（通过
+   `convertDataOriginToCanvasOrigin` 转换），但浮窗不会精确覆盖在画布元素上。
+   要让批注真正覆盖画布元素，需要未来 EDA 提供透明覆盖层 API，或改用画布图元
+   （`PCB_Primitive`）绘制标记。
+
+2. **坐标转换性能**：每个 thread 每次轮询需要 2 次 `convertDataOriginToCanvasOrigin` 调用
+   （bbox 两个角点），thread 数量多时可能影响性能。当前轮询间隔 250ms，可调。
+
+3. **方案B 文档源码兼容性**：`setDocumentSource` 是 BETA API，标记块追加在源码末尾。
+   若 EDA 文档源码是严格 JSON，末尾追加非 JSON 内容可能导致解析失败。需 PoC 验证
+   是否破坏设计数据。异常时可用"恢复工程源码"菜单还原。
+
+4. **EDA 版本要求**：`eda.sys_Window.getViewportSize()` 需要 EDA v3.2.162+。
+
+5. **原理图支持**：`SCH_Document` 类型定义未暴露坐标转换方法，原理图批注暂不支持。
 
 ---
 
@@ -555,24 +657,26 @@ mouseup → 确认批注框
 | ✨ destroy 清理 iframe | P2 | 卸载时移除兜底 iframe DOM，避免泄漏 |
 | 🧪 PoC 验证 | 🟡 进行中 | 待在实际 EDA 环境中安装验证 |
 
-### 10.2 阶段 2 — 云同步
+### 10.2 阶段 2 — 准协同 / 方案B（已完成）
 
 | 子任务 | 状态 | 完成日期 | 说明 |
 |---|---|---|---|
-| 后端服务骨架 | ⚪ 待开始 | - | Node.js + Fastify + SQLite |
-| REST API | ⚪ 待开始 | - | 评论 CRUD + 用户 |
-| RestSync 实现 | ⚪ 待开始 | - | 扩展端同步适配器 |
-| 部署方案 | ⚪ 待开始 | - | Docker + VPS |
+| ProjectSync 实现 | ✅ 已完成 | 2026-07-17 | 标记块注入策略，base64 编码，Buffer/btoa/hex 三级降级 |
+| PanelController 集成 | ✅ 已完成 | 2026-07-17 | syncToProject/syncFromProject/restoreProjectBackup + 确认弹窗 |
+| 菜单项注册 | ✅ 已完成 | 2026-07-17 | sch + pcb 各三项菜单（同步/读取/恢复） |
+| 原始源码备份 | ✅ 已完成 | 2026-07-17 | syncToProject 前自动备份到 sys_Storage，支持恢复 |
+| 紧急恢复机制 | ✅ 已完成 | 2026-07-17 | "恢复工程源码"菜单可还原到写入前状态 |
+| 🧪 PoC 验证 | 🟡 进行中 | - | 待在 EDA 环境验证 setDocumentSource 是否破坏设计数据 |
 
-### 10.3 阶段 3 — 实时协同
+### 10.3 阶段 3 — 实时协同（⏳ 等待嘉立创开放API）
 
-| 子任务 | 状态 | 完成日期 | 说明 |
-|---|---|---|---|
-| WebSocket 服务 | ⚪ 待开始 | - | ws 库 + 房间管理 |
-| WsSync 实现 | ⚪ 待开始 | - | 扩展端 WebSocket 客户端 |
-| 多人光标 | ⚪ 待开始 | - | Presence 系统 |
-| 冲突处理 | ⚪ 待开始 | - | 操作日志 + 版本号 |
-| 心跳 & 重连 | ⚪ 待开始 | - | 稳定性保障 |
+| 子任务 | 状态 | 阻塞原因 |
+|---|---|---|
+| 协作者列表 / 在线状态 | ⏳ 阻塞 | EDA 未暴露协作者查询 API |
+| 实时光标 / 视图同步 | ⏳ 阻塞 | EDA 未暴露光标/视图广播 API |
+| 实时评论推送 | ⏳ 阻塞 | sys_MessageBus 仅限本机，不跨用户 |
+| 冲突解决 / 操作日志 | ⏳ 阻塞 | 无共享 KV 存储，无操作日志 API |
+| 心跳 & 重连 | ⏳ 阻塞 | 依赖自建 WebSocket 服务器（偏离"靠 EDA 同步"目标） |
 
 ---
 
@@ -580,11 +684,12 @@ mouseup → 确认批注框
 
 | 风险 | 等级 | 应对 |
 |---|---|---|
-| 坐标换算不准确 | 🔴 高 | PoC 阶段重点验证，准备轮询兜底方案 |
-| iframe 影响画布操作 | 🟡 中 | pointer-events 穿透控制 |
+| 方案B 破坏设计数据 | 🔴 高 | `setDocumentSource` 是 BETA API，标记块注入可能破坏文档源码解析。syncToProject 前自动备份原始源码，异常时可用"恢复工程源码"菜单还原。PoC 阶段重点验证 |
+| 坐标换算不准确 | 🔴 高 | PoC 阶段重点验证 annotation iframe 定位精度，准备轮询兜底方案 |
+| 多人同时 syncToProject 覆盖冲突 | 🟡 中 | 方案B 无锁机制，多人同时同步会互相覆盖。建议团队约定由一人负责同步 |
 | 部分 EDA API 不可用 | 🟡 中 | 准备替代方案（轮询代替事件等） |
 | 大数据量性能问题 | 🟢 低 | 虚拟滚动 + Canvas 渲染（后续优化） |
-| 扩展审核被拒 | 🟡 中 | 严格遵守扩展开发规范，不修改用户设计数据 |
+| 扩展审核被拒 | 🟡 中 | 严格遵守扩展开发规范；方案B 会修改用户文档源码，需在审核说明中明确告知用户风险 |
 
 ---
 

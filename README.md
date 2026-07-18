@@ -1,34 +1,45 @@
 # CoComment — 嘉立创EDA 团队评论批注扩展
 
-> 版本：v0.1.0
+> 版本：v0.2.0
 > 适用：嘉立创EDA专业版 / EasyEDA Pro (EDA 引擎 ^3.0.0)
-> 状态：阶段 1（本地评论 MVP）已开发完成，待真实 EDA 环境 PoC 验证
+> 状态：阶段 1（本地评论 MVP）+ 阶段 2（方案B 准协同）已开发完成，待真实 EDA 环境 PoC 验证；阶段 3（实时协同）等待嘉立创开放 API
 
-在原理图和 PCB 画布上直接圈选区域、添加评论、追踪解决状态，类似 Figma 的评论协作能力。当前为单机本地版，后续将演进到多人协同。
+在原理图和 PCB 画布上直接圈选区域、添加评论、追踪解决状态，类似 Figma 的评论协作能力。阶段 2 通过把评论数据序列化进工程文档源码，复用 EDA 自身的团队工程同步机制实现准协同（无需自建后端）。
 
 ---
 
 ## 一、功能列表
 
-### 已实现（阶段 1 本地版）
+### 已实现
+
+#### 阶段 1 — 本地评论 MVP
 
 | 功能 | 说明 |
 |---|---|
-| PCB 批注框绘制 | 在 PCB 画布上拖框圈选区域，创建批注 |
+| 批注绘制 | 打开绘制 Dialog，手绘/粘贴截图/上传图片作为批注 |
 | 评论线程管理 | 增删改查、未解决/已解决状态切换 |
 | 评论 CRUD | 在线程下添加、删除评论（仅作者可删） |
-| 视图自动跟随 | 缩放/平移画布时批注框自动跟随（requestAnimationFrame 轮询） |
+| 视图自动跟随 | 缩放/平移画布时批注框自动跟随（sys_Timer 轮询） |
 | 点击定位 | 在列表点线程卡片 → 画布定位到批注位置 + 闪烁高亮 |
-| 本地存储 | 评论数据存到 localStorage，刷新不丢 |
+| 本地存储 | 评论数据存到 `eda.sys_Storage`，刷新不丢 |
 | JSON 导入导出 | 把当前工程所有评论导出为 JSON，或从 JSON 导入 |
 | 用户设置 | 修改昵称 + 选择批注颜色（8 色可选） |
 | 搜索过滤 | 按评论内容/作者名搜索，按状态（全部/未解决/已解决）过滤 |
 | 显示/隐藏批注 | 一键切换画布上所有批注框的显隐 |
+| 多行文字批注 | textarea 多行输入，6 档字号选择，Enter 换行 / Ctrl+Enter 提交 / Esc 取消 |
 
-### 未实现（后续阶段）
+#### 阶段 2 — 方案B 准协同
 
-- ❌ 原理图批注（`SCH_Document` API 未在类型定义中暴露）
-- ❌ 多人协同（阶段 2 后端 REST + 阶段 3 WebSocket）
+| 功能 | 说明 |
+|---|---|
+| 同步评论到工程 | 把评论序列化为标记块（`%%COCOMMENT_V1:<base64>%%`）追加到 sch/pcb 文档源码末尾，靠 EDA 工程同步机制传播给团队成员 |
+| 从工程读取评论 | 从当前文档源码提取评论数据并恢复到本地存储 |
+| 恢复工程源码 | 紧急恢复，用上次同步前备份的原始源码覆盖当前文档，还原设计数据 |
+
+### 未实现
+
+- ❌ 原理图批注（`SCH_Document` 坐标转换 API 未暴露）
+- ❌ 实时多人协同（等待嘉立创开放协作者列表、在线状态、实时光标、跨用户消息广播等 API，详见 [DEV_DOC.md](./docs/DEV_DOC.md) 阶段 3）
 - ❌ 评论附件（图片/文件上传）
 - ❌ @ 提及
 
@@ -62,14 +73,15 @@ dist/
 ├── index.js              # 扩展主入口（esbuild 打包为 IIFE）
 └── iframe/
     ├── panel.html        # 评论面板
-    └── annotation.html   # 透明批注覆盖层
+    ├── annotation.html   # 批注渲染层
+    └── draw.html         # 绘制 Dialog
 ```
 
 **`npm run build` 额外产物**（位于 `pro-api-sdk/build/dist/`）：
 
 ```
 build/dist/
-└── cocomment_v0.1.0.eext   # 嘉立创EDA扩展包（zip 格式，按 .edaignore 过滤）
+└── cocomment_v0.2.0.eext   # 嘉立创EDA扩展包（zip 格式，按 .edaignore 过滤）
 ```
 
 `.eext` 是嘉立创EDA扩展的官方打包格式，本质是 zip 压缩包，内部按 [.edaignore](./.edaignore) 规则过滤掉 `node_modules`、`src`、`.npm-cache` 等开发文件，只保留运行时所需文件。
@@ -92,9 +104,9 @@ build/dist/
 
 ### 方式 B：安装 .eext 包（发布用）
 
-1. 执行 `npm run build` 生成 `build/dist/cocomment_v0.1.0.eext`
+1. 执行 `npm run build` 生成 `build/dist/cocomment_v0.2.0.eext`
 2. 在嘉立创EDA专业版的扩展管理页面选择 **从文件安装**
-3. 选择 `cocomment_v0.1.0.eext` 文件
+3. 选择 `cocomment_v0.2.0.eext` 文件
 
 ---
 
@@ -102,15 +114,18 @@ build/dist/
 
 ### 4.1 菜单功能
 
-在原理图或 PCB 编辑器中，顶部 **CoComment** 菜单提供 6 个操作：
+在原理图或 PCB 编辑器中，顶部 **CoComment** 菜单提供 9 个操作：
 
 | 菜单项 | 功能 |
 |---|---|
 | 显示评论面板 | 切换右侧评论列表面板的显隐 |
-| 添加批注 | 进入绘制模式，在画布拖框圈选区域 |
+| 添加批注 | 打开绘制 Dialog，手绘/粘贴截图/上传图片作为批注 |
 | 显示/隐藏批注 | 切换画布上所有批注框的显隐 |
 | 导出评论 | 导出当前工程所有评论为 JSON |
 | 导入评论 | 从 JSON 文件导入评论（覆盖当前工程） |
+| 同步评论到工程 | 方案B：把评论序列化进工程文档源码，靠 EDA 工程同步机制传播（写入前弹窗确认 + 自动备份） |
+| 从工程读取评论 | 方案B：从当前文档源码提取评论数据并恢复到本地 |
+| 恢复工程源码 | 紧急恢复，用上次同步前备份的原始源码覆盖当前文档 |
 | 关于 CoComment | 显示版本信息 |
 
 > Home 页面只有"关于"一个菜单。
@@ -132,12 +147,27 @@ build/dist/
 
 ```
 1. 点菜单 "添加批注"
-2. 鼠标移到 PCB 画布，光标变十字
-3. 按住鼠标拖一个矩形框，松开
+2. 弹出"绘制批注" Dialog，可用画笔/矩形/箭头/文字手绘，或 Ctrl+V 粘贴截图，或上传本地图片
+3. 点"确认"关闭 Dialog
 4. 右侧面板自动出现新线程，输入框聚焦
 5. 输入评论内容，回车提交
-6. 画布上出现红色虚线框 + 序号徽章
+6. 画布上出现批注图像 + 序号徽章
 ```
+
+### 4.4 团队协作工作流（方案B）
+
+```
+A 同事：
+1. 在自己的 EDA 客户端添加/修改评论
+2. 点菜单 "同步评论到工程" → 弹窗确认 → 评论写入文档源码
+3. 正常保存工程（让 EDA 工程同步机制把文档传播给团队）
+
+B 同事：
+1. EDA 工程同步拉取到 A 写入的新文档
+2. 点菜单 "从工程读取评论" → 评论恢复到本地 → 面板自动刷新
+```
+
+⚠️ 注意：方案B 是准协同（非实时），需要 A 主动同步、B 主动读取。实时多人协同（看到对方光标、评论即时推送）等待嘉立创开放 API。
 
 ---
 
@@ -161,16 +191,19 @@ pro-api-sdk/
 │   │   └── Navigator.ts         # 定位导航
 │   │
 │   ├── ui/                      # UI 控制层
-│   │   ├── PanelController.ts   # 业务编排 + 消息路由
-│   │   └── IframeManager.ts     # iframe 创建/显隐/消息（官方 API 探测 + 原生降级）
+│   │   ├── PanelController.ts   # 业务编排 + 消息路由 + 方案B同步入口
+│   │   ├── IframeManager.ts     # sys_IFrame 窗口管理（panel/overlay/draw）
+│   │   └── MessageBridge.ts     # sys_MessageBus 跨 context 通信桥
 │   │
 │   ├── iframe/                  # iframe 承载的 UI
 │   │   ├── panel.html           # 评论面板（右侧列表）
-│   │   └── annotation.html      # 透明批注覆盖层
+│   │   ├── annotation.html      # 批注渲染层
+│   │   └── draw.html            # 绘制 Dialog（手绘/粘贴/上传图片）
 │   │
 │   ├── sync/                    # 存储同步层
 │   │   ├── SyncProvider.ts      # 同步接口（阶段切换时换实现）
-│   │   └── LocalSync.ts         # 本地存储实现（localStorage）
+│   │   ├── LocalSync.ts         # 本地存储实现（基于 sys_Storage）
+│   │   └── ProjectSync.ts       # 方案B：工程文档源码双向同步（基于 sys_FileManager BETA API）
 │   │
 │   ├── types/                   # 类型定义
 │   │   ├── comment.ts           # CommentThread / Comment / BBox
@@ -195,24 +228,27 @@ pro-api-sdk/
 │   ├── index.js
 │   └── iframe/
 │       ├── panel.html
-│       └── annotation.html
+│       ├── annotation.html
+│       └── draw.html
 │
 └── build/dist/                  # 打包产物（build 后生成）
-    └── cocomment_v0.1.0.eext
+    └── cocomment_v0.2.0.eext
 ```
 
 ---
 
 ## 六、技术原理（简述）
 
-扩展本质 = 被嘉立创EDA加载到页面 JS 上下文里的一段代码：
+扩展本质 = 被嘉立创EDA加载到主进程 JS 上下文里的一段代码：
 
 1. **EDA 读取 extension.json** → 用户点菜单时反射调用 `dist/index.js` 中对应的导出函数
-2. **`eda` 全局对象** = 扩展调用宿主能力的唯一通道（如 `eda.pcb_Document.zoomTo()`）
-3. **批注框原理** = 透明 iframe 覆盖画布（`position: fixed` + `pointer-events` 穿透控制）+ 逻辑坐标 ↔ 屏幕坐标换算
-4. **视图同步** = requestAnimationFrame 轮询 `eda.pcb_Document.zoomTo()` 拿当前视图区域，推算 zoom/offset
-5. **通信** = parent ↔ iframe 用 `window.postMessage` 双向通信（消息协议见 [src/types/messages.ts](./src/types/messages.ts)）
-6. **存储** = `window.localStorage`（EDA 未提供 sys_Storage，改用浏览器原生）
+2. **`eda` 全局对象** = 扩展调用宿主能力的唯一通道（`sys_*` / `pcb_*` / `sch_*` 命名空间 API）
+3. **批注渲染** = 通过 `eda.sys_IFrame.openIFrame` 打开 iframe 窗口（panel/annotation/draw），用 `eda.sys_MessageBus` 跨 context 通信
+4. **视图同步** = `eda.sys_Timer.setIntervalTimer` 轮询视图状态，检测变化时刷新批注位置
+5. **坐标换算** = `eda.pcb_Document.convertDataOriginToCanvasOrigin` / `convertCanvasOriginToDataOrigin`（逻辑坐标 ↔ 画布像素坐标）
+6. **通信** = `eda.sys_MessageBus.publish/subscribe`（主进程 ↔ iframe 双向，按 topic 路由，构造时清理旧订阅防泄漏）
+7. **存储** = `eda.sys_Storage.getExtensionUserConfig/setExtensionUserConfig`（按用户隔离，主进程可调）
+8. **方案B 同步** = `eda.sys_FileManager.getDocumentSource/setDocumentSource`（BETA API），把评论序列化为标记块追加到文档源码末尾，靠 EDA 工程同步机制传播
 
 详见 [docs/DEV_DOC.md](./docs/DEV_DOC.md)。
 
@@ -224,24 +260,24 @@ pro-api-sdk/
 
 **正常日志**：
 ```
-[cocomment] HTML script 语法检查通过
-[cocomment] Copied iframe assets to dist/iframe
+[CoComment] activate() called, status= onStartupFinished
+[CoComment] closed stale iframes on activate
+[CoComment] ensureInitialized() done
 ```
 
-**重点排查 3 个可能失败的点**：
+**重点排查 4 个可能失败的点**：
 
-1. **`eda.pcb_Document.zoomTo()` 返回值**
-   在 F12 控制台执行：
-   ```javascript
-   await eda.pcb_Document.zoomTo()
-   ```
-   预期返回 `{left, right, top, bottom}`。如果返回其他结构，[src/core/AnnotationRenderer.ts](./src/core/AnnotationRenderer.ts) 的视图推算逻辑要调整。
+1. **`eda.sys_IFrame.openIFrame` 行为**
+   预期打开的是带标题栏的 Dialog 窗口（不是透明覆盖层）。如果弹出的窗口是空白，检查 [src/iframe/draw.html](./src/iframe/draw.html) 内的 onerror 错误提示框。
 
-2. **iframe 是否创建成功**
-   控制台看有无 `sys_PanelControl.create failed` 或 `sys_IFrame.create failed` 警告。如果官方 API 不存在，会降级到原生 iframe。
+2. **消息是否重复触发**
+   发送一条评论后看控制台日志次数。如果每条消息触发多次，可能是旧订阅未清理，检查 `globalThis.__cocomment_messagebus_tasks__` 是否被正确维护（见 [src/ui/MessageBridge.ts](./src/ui/MessageBridge.ts)）。
 
-3. **iframe 路径**
-   控制台看 panel.html 是否 404。当前用 `./iframe/panel.html`（相对 index.js 所在目录）。
+3. **方案B 是否破坏设计数据** ⚠️ 重点
+   执行"同步评论到工程"前，先用 F12 控制台确认 `eda.sys_FileManager.getDocumentSource()` 能正常返回源码。同步后立即检查 sch/pcb 文档是否还能正常编辑。如果损坏，用"恢复工程源码"菜单还原。
+
+4. **iframe 路径**
+   控制台看 panel.html / draw.html 是否 404。当前用 `./iframe/xxx.html`（相对 index.js 所在目录）。
 
 如果遇到问题，把 F12 控制台的 `[CoComment]` 日志和报错贴出来排查。
 
@@ -278,5 +314,7 @@ esbuild 会监听文件变化自动重新编译到 `dist/`。
 - [嘉立创EDA专业版 开发文档](https://prodocs.lceda.cn/cn/api/guide/)
 - [扩展 API 参考](https://prodocs.lceda.cn/cn/api/reference/pro-api.html)
 - [扩展广场](https://ext.lceda.cn/)
-- [pro-api-sdk 脚手架](https://gitee.com/jlceda/pro-api-sdk)
+- [pro-api-sdk 脚手架](https://github.com/easyeda/pro-api-sdk)
+- [本项目仓库](https://github.com/ZZC43013/jlceda-cocomment)
 - [详细开发文档](./docs/DEV_DOC.md)
+- [更新日志](./CHANGELOG.md)

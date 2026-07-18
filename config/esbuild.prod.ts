@@ -15,7 +15,7 @@ import common from './esbuild.common';
  */
 function checkIframeScripts(): void {
 	const iframeDir = path.join(__dirname, '../src/iframe');
-	const htmlFiles = ['panel.html', 'annotation.html'];
+	const htmlFiles = ['panel.html', 'annotation.html', 'draw.html'];
 	let hasError = false;
 
 	for (const file of htmlFiles) {

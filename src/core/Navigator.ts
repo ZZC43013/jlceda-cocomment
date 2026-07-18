@@ -3,9 +3,13 @@ import type { CommentThread } from '../types/comment';
 /**
  * Navigator — 负责把视图定位到指定 thread 的锚点位置。
  *
+ * 真实 API（来自 easyeda-api skill references/classes/PCB_Document.md）:
+ *   navigateToCoordinates(x, y): Promise<boolean>
+ *     - 定位到画布坐标（数据层面坐标）
+ *     - 此处的单位为数据层面单位，在跨度上等同于画布层面的 mil
+ *
  * 注：闪烁面板卡片由 PanelController.handleThreadSelect 直接通过
- * IframeManager.sendToPanel({ type: 'thread:flash' }) 完成，
- * Navigator 不再发 CustomEvent（之前的 flashThread 是死代码，无人监听）。
+ * bridge.sendToPanel({ type: 'thread:flash' }) 完成。
  */
 export class Navigator {
 	async jumpToThread(thread: CommentThread): Promise<void> {
@@ -24,9 +28,9 @@ export class Navigator {
 				if (!doc) {
 					return;
 				}
-				// zoomTo 同时完成定位+缩放：scaleRatio 单位 1/100，150 = 150%
-				if (typeof doc.zoomTo === 'function') {
-					await doc.zoomTo(centerX, centerY, 150);
+				// navigateToCoordinates：定位到数据层面坐标（不是 zoomTo，zoomTo 不存在）
+				if (typeof doc.navigateToCoordinates === 'function') {
+					await doc.navigateToCoordinates(centerX, centerY);
 				}
 			}
 		}

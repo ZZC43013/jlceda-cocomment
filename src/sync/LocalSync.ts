@@ -8,36 +8,16 @@ import type { ISyncProvider } from './SyncProvider';
 const STORAGE_KEY = 'cocomment_data_v1';
 
 /**
- * 浏览器原生 localStorage 访问器。
+ * 基于 eda.sys_Storage 的本地存储实现。
  *
- * 说明：扩展运行在嘉立创EDA的浏览器/Electron 沙箱内，类型定义文件
- * `@jlceda/pro-api-types/index.d.ts` 中并未收录 `eda.sys_Storage` 这类
- * 键值存储 API（仅有 `sys_FileManager` 工程文件、`sys_FileSystem` 文件
- * 读写、`sys_Unit` 单位三类 SYS_ 接口）。因此本地阶段直接使用浏览器
- * 原生 localStorage，避免依赖未公开 API。
+ * 真实 API（来自 easyeda-api skill references/classes/SYS_Storage.md）:
+ *   - getExtensionUserConfig(key): any | undefined  （同步）
+ *   - setExtensionUserConfig(key, value): Promise<boolean>  （异步）
  *
- * 阶段 2 上云后会切换到 RestSync，不再使用本类。
+ * 注意：sys_Storage 仅扩展主进程可调，iframe 内调用会 throw。
+ * 因此所有持久化都由 parent（扩展主进程）的 LocalSync 完成，
+ * iframe 通过 sys_MessageBus 通知 parent 做写操作。
  */
-function storageGet(key: string): string | null {
-	try {
-		return window.localStorage.getItem(key);
-	}
-	catch (e) {
-		// 隐私模式或跨域受限时 localStorage 可能抛错
-		console.warn('[CoComment] localStorage.getItem failed:', e);
-		return null;
-	}
-}
-
-function storageSet(key: string, value: string): void {
-	try {
-		window.localStorage.setItem(key, value);
-	}
-	catch (e) {
-		console.warn('[CoComment] localStorage.setItem failed:', e);
-	}
-}
-
 export class LocalSync implements ISyncProvider {
 	private data: LocalData;
 	private threadChangeCallbacks: Array<(op: SyncOp) => void> = [];
@@ -52,14 +32,14 @@ export class LocalSync implements ISyncProvider {
 	}
 
 	private loadFromStorage(): LocalData {
-		const raw = storageGet(STORAGE_KEY);
-		if (raw) {
-			try {
-				return JSON.parse(raw) as LocalData;
+		try {
+			const raw = eda.sys_Storage.getExtensionUserConfig(STORAGE_KEY);
+			if (raw) {
+				return typeof raw === 'string' ? (JSON.parse(raw) as LocalData) : (raw as LocalData);
 			}
-			catch (e) {
-				console.warn('[CoComment] Stored data corrupted, resetting:', e);
-			}
+		}
+		catch (e) {
+			console.warn('[CoComment] sys_Storage.getExtensionUserConfig failed:', e);
 		}
 		return this.createEmptyData();
 	}
@@ -78,7 +58,12 @@ export class LocalSync implements ISyncProvider {
 	}
 
 	private saveToStorage(): void {
-		storageSet(STORAGE_KEY, JSON.stringify(this.data));
+		try {
+			void eda.sys_Storage.setExtensionUserConfig(STORAGE_KEY, this.data);
+		}
+		catch (e) {
+			console.warn('[CoComment] sys_Storage.setExtensionUserConfig failed:', e);
+		}
 	}
 
 	private ensureProject(projectId: string): ProjectData {

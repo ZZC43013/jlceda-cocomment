@@ -167,6 +167,17 @@
 			-webkit-box-orient: vertical;
 			line-height: 1.5;
 		}
+		.thread-thumb {
+			margin-top: 6px;
+			border-radius: 4px;
+			border: 1px solid #e8e8e8;
+			max-width: 100%;
+			max-height: 100px;
+			object-fit: contain;
+			display: block;
+			cursor: pointer;
+		}
+		.thread-thumb:hover { border-color: #1890ff; }
 		.empty {
 			text-align: center;
 			padding: 40px 20px;
@@ -398,6 +409,7 @@
 	</style>
 </head>
 <body>
+	<div id="fatalError" style="display:none;position:fixed;top:0;left:0;right:0;bottom:0;background:#fff2f0;color:#d4380d;padding:12px;font-size:12px;z-index:9999;overflow:auto;white-space:pre-wrap;font-family:monospace;"></div>
 	<div class="app">
 		<div class="header">
 			<div class="header-title">💬 CoComment</div>
@@ -462,6 +474,32 @@
 	</div>
 
 	<script>
+		window.onerror = function(msg, src, line, col, err) {
+			var el = document.getElementById('fatalError');
+			if (el) {
+				el.style.display = 'block';
+				el.textContent = '[onerror] ' + msg + '\n' + (src ? (src + ':' + line + ':' + col) : '') + '\n' + (err && err.stack ? err.stack : String(err));
+			}
+			console.error('[CoComment panel] onerror:', msg, err);
+			return true;
+		};
+		window.addEventListener('unhandledrejection', function(e) {
+			var el = document.getElementById('fatalError');
+			if (el) {
+				el.style.display = 'block';
+				el.textContent = '[unhandledrejection] ' + (e.reason && e.reason.stack ? e.reason.stack : String(e.reason));
+			}
+			console.error('[CoComment panel] unhandledrejection:', e.reason);
+		});
+		// 检查 eda 全局对象是否可用
+		if (typeof eda === 'undefined') {
+			var el = document.getElementById('fatalError');
+			if (el) {
+				el.style.display = 'block';
+				el.textContent = '[fatal] eda 全局对象未定义，iframe 内无法访问 eda.sys_MessageBus';
+			}
+			console.error('[CoComment panel] eda is undefined in iframe');
+		}
 		(function() {
 			const state = {
 				threads: [],
@@ -486,9 +524,17 @@
 			const deleteBtn = document.getElementById('deleteBtn');
 			const sendBtn = document.getElementById('sendBtn');
 
-			function post(type, data) {
-				window.parent.postMessage({ source: 'cocomment-panel', type, ...(data || {}) }, '*');
+			// 通过 eda.sys_MessageBus 向 parent 发消息（不用 window.parent.postMessage）
+		const TOPIC_FROM_PANEL = 'cocomment:from-panel';
+		const TOPIC_TO_PANEL = 'cocomment:to-panel';
+
+		function post(type, data) {
+			try {
+				eda.sys_MessageBus.publish(TOPIC_FROM_PANEL, { type, ...(data || {}) });
+			} catch (e) {
+				console.warn('[CoComment panel] publish failed:', e);
 			}
+		}
 
 			function formatTime(ts) {
 				const d = new Date(ts);
@@ -544,7 +590,7 @@
 					const num = (state.numbers && state.numbers[t.id]) || 0;
 					const titleText = firstContent || '(待输入评论)';
 
-					card.innerHTML = '\
+					var html = '\
 						<div class="thread-header">\
 							<span class="thread-title">#' + (num > 0 ? num : '?') + ' ' + escapeHtml(titleText) + '</span>\
 							<span class="thread-status ' + t.status + '">' + statusText + '</span>\
@@ -553,6 +599,11 @@
 							<span>' + comments.length + ' 条评论</span>\
 							<span>' + formatTime(t.createdAt) + '</span>\
 						</div>';
+					// 批注锚点图像缩略图
+					if (t.anchor && t.anchor.image) {
+						html += '<img class="thread-thumb" src="' + t.anchor.image + '" alt="批注图" data-thread-id="' + t.id + '" />';
+					}
+					card.innerHTML = html;
 
 					card.addEventListener('click', function() {
 						setActiveThread(t.id);
@@ -598,6 +649,18 @@
 
 				const comments = state.comments[thread.id] || [];
 				commentListEl.innerHTML = '';
+				// 在评论列表顶部显示批注锚点原图
+				if (thread.anchor && thread.anchor.image) {
+					var anchorEl = document.createElement('div');
+					anchorEl.className = 'comment-item';
+					anchorEl.innerHTML = '\
+						<div class="comment-avatar" style="background:#fa8c16">图</div>\
+						<div class="comment-body">\
+							<div class="comment-author">批注图像</div>\
+							<img src="' + thread.anchor.image + '" style="max-width:100%;border-radius:4px;border:1px solid #e8e8e8;margin-top:4px;" alt="批注图" />\
+						</div>';
+					commentListEl.appendChild(anchorEl);
+				}
 				comments.forEach(c => {
 					const item = document.createElement('div');
 					item.className = 'comment-item';
@@ -755,52 +818,56 @@
 				renderCommentDetail();
 			});
 
-			window.addEventListener('message', function(e) {
-				const msg = e.data;
-				if (!msg || typeof msg !== 'object') return;
-				if (msg.source === 'cocomment-parent') {
-					switch (msg.type) {
-						case 'threads:update':
-							state.threads = msg.threads || [];
-							state.comments = msg.comments || {};
-							state.numbers = msg.numbers || {};
-							renderThreadList();
-							renderCommentDetail();
-							break;
-						case 'thread:created':
-							// 新批注已创建：选中并 focus 输入框，等用户输入首条评论
-							state.activeThreadId = msg.thread.id;
-							post('request:threads');
-							// 等下一帧渲染完再 focus
-							setTimeout(function() {
-								commentDetailEl.classList.add('active');
-								commentInput.focus();
-								commentInput.placeholder = '输入评论内容，按 Ctrl+Enter 发送...';
-							}, 50);
-							break;
-						case 'thread:flash':
-							// 由 Navigator.flashThread 触发，闪烁对应卡片
-							flashThreadCard(msg.threadId);
-							break;
-						case 'user:update':
-							// 收到当前用户信息，如果是请求打开设置则打开
-							if (msg.user) {
-								state.currentUser = msg.user;
-								if (settingsModal.classList.contains('active') === false && document.activeElement === document.body) {
-									// 不自动打开，仅在用户已点击设置按钮时使用
-								}
-								// 若刚刚点击了设置按钮（active 还没打开），打开它
-								if (!settingsModal.classList.contains('active')) {
-									openSettings(msg.user);
-								}
-							}
-							break;
-						case 'request:refresh':
-							post('request:threads');
-							break;
+			// 监听 parent 通过 sys_MessageBus 发来的消息（不用 window.addEventListener('message')）
+		// 防抖：避免多个残留 iframe 实例同时请求导致主进程重复刷新
+		var refreshDebounce = null;
+		function requestRefresh() {
+			if (refreshDebounce) clearTimeout(refreshDebounce);
+			refreshDebounce = setTimeout(function() {
+				refreshDebounce = null;
+				post('request:threads');
+			}, 100);
+		}
+		eda.sys_MessageBus.subscribe(TOPIC_TO_PANEL, function(msg) {
+			if (!msg || typeof msg !== 'object') return;
+			switch (msg.type) {
+				case 'threads:update':
+					state.threads = msg.threads || [];
+					state.comments = msg.comments || {};
+					state.numbers = msg.numbers || {};
+					renderThreadList();
+					renderCommentDetail();
+					break;
+				case 'thread:created':
+					// 新批注已创建：选中并 focus 输入框，等用户输入首条评论
+					state.activeThreadId = msg.thread.id;
+					requestRefresh();
+					// 等下一帧渲染完再 focus
+					setTimeout(function() {
+						commentDetailEl.classList.add('active');
+						commentInput.focus();
+						commentInput.placeholder = '输入评论内容，按 Ctrl+Enter 发送...';
+					}, 50);
+					break;
+				case 'thread:flash':
+					// 由 Navigator.flashThread 触发，闪烁对应卡片
+					flashThreadCard(msg.threadId);
+					break;
+				case 'user:update':
+					// 收到当前用户信息
+					if (msg.user) {
+						state.currentUser = msg.user;
+						// 若设置弹窗未打开，打开它
+						if (!settingsModal.classList.contains('active')) {
+							openSettings(msg.user);
+						}
 					}
-				}
-			});
+					break;
+				case 'request:refresh':
+					requestRefresh();
+					break;
+			}
+		});
 
 			function flashThreadCard(threadId) {
 				const card = threadListEl.querySelector('.thread-card[data-id="' + threadId + '"]');

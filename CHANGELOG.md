@@ -1,3 +1,21 @@
+# 0.2.0
+
+## 新增
+
+1. 新增方案B：评论数据与工程文档双向同步（准协同），把评论序列化为标记块（`%%COCOMMENT_V1:<base64>%%`）追加到当前 sch/pcb 文档源码末尾，靠 EDA 自身的工程同步机制传播给团队成员
+2. 新增 `src/sync/ProjectSync.ts` 模块：基于 `eda.sys_FileManager.getDocumentSource` / `setDocumentSource` 两个 BETA API 实现评论数据与文档源码的双向同步，含标记块注入/提取、原始源码备份、紧急恢复
+3. 新增"同步评论到工程"菜单（sch + pcb）：把当前所有评论写入工程文档源码，写入前弹窗确认风险并自动备份原始源码
+4. 新增"从工程读取评论"菜单（sch + pcb）：从工程文档源码提取评论数据并恢复到本地存储，自动刷新面板
+5. 新增"恢复工程源码"菜单（sch + pcb）：紧急恢复，用上次同步前的备份覆盖当前文档源码，还原设计数据
+6. 新增 `eda.sys_Dialog.showConfirmationMessage` 确认弹窗封装（PanelController.confirm），用于方案B写入前的风险确认
+7. 新增 base64 编码三级降级策略：Buffer（Node 主进程）→ btoa（浏览器/iframe）→ hex（纯 JS），保证主进程和 iframe 均可编解码
+
+## 变更
+
+1. 阶段2技术方案由"自建后端 REST API 云同步"调整为"方案B：评论随工程文档同步"，复用 EDA 自身的团队工程协作机制，无需自建服务器
+2. 阶段3"实时协同"标记为等待嘉立创开放 API：当前 EDA 未暴露协作者列表、在线状态、实时光标、跨用户消息广播、共享 KV 存储等 API，无法实现真正的实时多人协同
+3. 版本号 0.1.0 → 0.2.0
+
 # 0.1.0
 
 ## 新增
@@ -30,30 +48,3 @@
 9. 移除 Navigator.flashThread 死代码：发 CustomEvent 但全代码库无人监听
 10. CommentEngine.setCurrentUser 不再用 init() 复用（语义不清，会重新走冷启动），改用新增的 refreshUser 热更新方法
 
-# 1.2.0
-
-## 变更
-
-1. 使用纯 ESLint 的代码格式化方式
-2. 打包时额外进行压缩，可以获得更小的扩展包
-
-# 1.1.1
-
-## 变更
-
-1. 为了符合隐私政策，禁止在 extension.json、README.md、CHANGELOG.md、LICENSE 内添加电子邮箱地址作为联系方式
-
-# 1.1.0
-
-## 新增
-
-1. 新增扩展注册头部菜单的多语言翻译支持
-2. 新增更新日志（CHANGELOG.md）
-
-## 变更
-
-1. 替换已弃用的方法（SYS_Dialog.showInformationMessage）
-
-# 1.0.0
-
-初始版本
