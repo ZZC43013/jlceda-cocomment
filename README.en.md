@@ -55,3 +55,5 @@ This development tool uses the [Apache License 2.0](https://choosealicense.com/l
 The following screenshots show the CoComment extension in action:
 
 ![Extension details](插件详情.png)
+
+![Demo](演示_1.gif)
